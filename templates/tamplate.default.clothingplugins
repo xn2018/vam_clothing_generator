@@ -1,0 +1,24 @@
+{ 
+   "id" : "creator:cloth_id:plugin#0_Stopper.ClothingPluginManager", 
+   "plugins" : { 
+      "plugin#0" : "Stopper.ClothingPluginManager.7:/Custom/Scripts/Stopper/ClothingPluginManager/ClothingPluginManager.cs", 
+      "plugin#1" : "Stopper.Shoe_Helper.4:/Custom/Scripts/Stopper/ShoeHelper.cslist"
+   }, 
+   "storables" : [ 
+      { 
+         "id" : "plugin#1_Stopper.ShoeHelper", 
+         "toeColliderEnabled" : "false", 
+         "toeRotationTarget" : "35", 
+         "footRotationTarget" : "-35", 
+         "toeStiffness" : "2000", 
+         "toeDamper" : "3", 
+         "toeMaxForce" : "2000", 
+         "heelColliderLength" : "0.4956516", 
+         "heelColliderWifth" : "0.8041301", 
+         "heelColliderYOffset" : "-0.076696", 
+         "heelColliderZOffset" : "0.02999663", 
+         "heelColliderXRotation" : "122.5156", 
+         "toeColliderYOffset" : "-0.01165153"
+      }
+   ]
+}
