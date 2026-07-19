@@ -3,12 +3,8 @@ import bpy
 from mathutils import Vector
 from mathutils.bvhtree import BVHTree
 from .build_mesh_cache_from_object import build_mesh_cache_from_object
-from .wrap_types import SkinWrapCache, SkinWrapVertex, TriangleInfo, DAZMeshData
-
-from .DeriveMeshes import recover_vertex_normal
-from .build_wrap_vertices import WrapInputVertex
+from .wrap_types import DAZMeshData, PerSkinWrapCalculationResult, SkinWrapCache, SkinWrapVertex, WrapInputVertex
 from typing import Optional
-from typing import cast
 def empty_result():
     return SkinWrapVertex(
         closestTriangle=-1,
@@ -73,29 +69,51 @@ def clear_cache():
         "[SkinWrap] Cache cleared."
     )
 # ============================================================
+# Validate Cache
+# ============================================================
+def validate_cache(
+    obj,
+    cache:SkinWrapCache
+)->bool:
+    if cache is None:
+        return False
+    if cache.object_name != obj.name:
+        return False
+    if cache.mesh_pointer != obj.data.as_pointer():
+        return False
+    if cache.vertex_count != len(obj.data.vertices):
+        return False
+    return True
+# ============================================================
 # Ensure Cache
 # ============================================================
 def ensure_cache(
     genesis_obj: bpy.types.Object
-) -> SkinWrapCache|None:
+)->SkinWrapCache|None:
     global _CACHE
     #
     # First Build
     #
     if _CACHE is None:
-        _CACHE = build_mesh_cache_from_object(genesis_obj)
+        _CACHE = build_mesh_cache_from_object(
+            genesis_obj
+        )
         return _CACHE
     #
     # Not Ready
     #
     if not _CACHE.initialized:
-        _CACHE = build_mesh_cache_from_object(genesis_obj)
+        _CACHE = build_mesh_cache_from_object(
+            genesis_obj
+        )
         return _CACHE
     #
     # Object Changed
     #
     if _CACHE.object_name != genesis_obj.name:
-        _CACHE = build_mesh_cache_from_object(genesis_obj)
+        _CACHE = build_mesh_cache_from_object(
+            genesis_obj
+        )
         return _CACHE
     #
     # Vertex Count Changed
@@ -107,9 +125,14 @@ def ensure_cache(
             _CACHE.body_mesh.base_vertices
         )
     ):
-        _CACHE = build_mesh_cache_from_object(genesis_obj)
+        _CACHE = build_mesh_cache_from_object(
+            genesis_obj
+        )
         return _CACHE
-
+    #
+    # Cache valid
+    #
+    return _CACHE
 # ============================================================
 # build_anchor_triangle_cache
 # ============================================================
@@ -198,128 +221,38 @@ def build_anchor_triangle_cache(
         anchor_bvh
     )
 # ============================================================
-# find_nearest_triangle
-# ============================================================
-def find_nearest_triangle(
-    pos: Vector,
-    wrap_normal: Vector | None,
-    *,
-    anchor_only=False,
-    check_normals=False,
-    normal_dot_limit=0,
-)->TriangleInfo|None:
-    cache = get_cache()
-    if cache is None:
-        raise RuntimeError(
-            "find_nearest_triangle cache is None"
-        )
-    ##########################################################
-    # Select BVH
-    ##########################################################
-    if anchor_only:
-        if (
-            cache.anchor_bvh is None
-            or
-            not cache.anchor_triangles
-        ):
-            build_anchor_triangle_cache(
-                cache,
-                min_anchor_vertices=3
-            )
-        tree = cache.anchor_bvh
-        triangles = cache.anchor_triangles
-    else:
-        tree = cache.body_bvh
-        triangles = cache.body_triangles
-    if tree is None:
-        raise RuntimeError(
-            "BVH is None"
-        )
-    if not triangles:
-        return None
-    ##########################################################
-    # BVH Nearest
-    ##########################################################
-    hit = tree.find_nearest(
-        (
-            pos.x,
-            pos.y,
-            pos.z
-        )
-    )
-    if hit is None:
-        return None
-    (location,normal,polygon_index,distance) = hit
-    if polygon_index is None:
-        return None
-    if polygon_index < 0:
-        return None
-    ##########################################################
-    # Get TriangleInfo
-    ##########################################################
-    if polygon_index >= len(triangles):
-        return None
-    tri = triangles[
-        polygon_index
-    ]
-    ##########################################################
-    # Normal Check
-    ##########################################################
-    if (
-        wrap_normal is not None
-        and
-        check_normals
-    ):
-        dot = (
-            wrap_normal.dot(
-                tri.normal
-            )
-        )
-
-        if dot < normal_dot_limit:
-            print("BACKFACE",polygon_index,dot)
-            return None
-    return tri
-# ============================================================
 # Reorder Triangle
 # ============================================================
 def reorder_triangle(
     tri,
     pos
 ):
-
     verts=[
         (tri.vertex1,tri.v1),
         (tri.vertex2,tri.v2),
         (tri.vertex3,tri.v3),
     ]
-
     distances=[
         (v[1]-pos).length_squared
         for v in verts
     ]
-
     first=min(
         range(3),
         key=lambda i:distances[i]
     )
-
     order=[
         first,
         (first+1)%3,
         (first+2)%3
     ]
-
     ids=[
         verts[i][0]
         for i in order
     ]
-
     ps=[
         verts[i][1]
         for i in order
     ]
-
     return (
         ids[0],
         ids[1],
@@ -332,229 +265,28 @@ def reorder_triangle(
 # SkinWrap Matrix
 # ============================================================
 def calculate_skinwrap_matrix(
-    genesis_obj:bpy.types.Object,
-    clothing_mesh:DAZMeshData,
-    wrap_vertices:list[WrapInputVertex],
-    anchor_only:bool=False,
-    wrap_check_normals:bool=False,
-    max_wrap_distance:float=1.0
-)->list[SkinWrapVertex]:
-    empty_count={
-        "tri":0,
-        "distance":0,
-        "tangent1":0,
-        "normal":0,
-        "tangent2":0,
-        "wrap_normal":0
-    }
-    ##########################################################
-    # Genesis Cache
-    ##########################################################
+    genesis_obj: bpy.types.Object,
+    clothing_mesh: DAZMeshData,
+    wrap_vertices: list[WrapInputVertex],
+    anchor_only=False,
+    wrap_check_normals=False,
+    max_wrap_distance=1.0
+):
     cache=ensure_cache(
         genesis_obj
     )
     if cache is None:
         raise RuntimeError(
-            "SkinWrap cache is None"
+            "SkinWrap cache missing"
         )
-    ##########################################################
-    # Validate clothing UV mesh
-    ##########################################################
-    if (
-        len(wrap_vertices)
-        !=
-        len(clothing_mesh.uv_vertices)
-    ):
-        raise RuntimeError(
-            "UV vertex count mismatch"
-        )
-    if (
-        len(wrap_vertices)
-        !=
-        len(clothing_mesh.uv_normals)
-    ):
-        raise RuntimeError(
-            "UV normal count mismatch"
-        )
-    ##########################################################
-    # Matrix
-    ##########################################################
-    g_inv = (
-        genesis_obj.matrix_world.inverted()
+    local_matrix = (genesis_obj.matrix_world.inverted()@clothing_mesh.matrix_world)
+    normal_matrix = (local_matrix.to_3x3())
+    return PerSkinWrapCalculationResult(
+        wrap_vertices=wrap_vertices,
+        clothing_mesh=clothing_mesh,
+        local_matrix=local_matrix,
+        normal_matrix=normal_matrix,
+        anchor_only=anchor_only,
+        wrap_check_normals=wrap_check_normals,
+        max_wrap_distance=max_wrap_distance
     )
-    local_matrix = (
-        g_inv
-        @
-        clothing_mesh.matrix_world
-    )
-    normal_matrix = (
-        local_matrix
-        .to_3x3()
-    )
-    ##########################################################
-    # Result
-    ##########################################################
-    results=[]
-    print()
-    print("==============================")
-    print("Calculate SkinWrap Matrix BVH")
-    print("==============================")
-    print("Wrap vertices:",len(wrap_vertices))
-    ##########################################################
-    # Loop
-    ##########################################################
-    for wrap_vertex in wrap_vertices:
-        ######################################################
-        # Position
-        ######################################################
-        local_pos = (
-            local_matrix
-            @
-            wrap_vertex.co
-        )
-        ######################################################
-        # Normal
-        ######################################################
-        wrap_normal = (normal_matrix@wrap_vertex.normal)
-
-        if wrap_normal.length_squared < 1e-12:
-            empty_count["wrap_normal"]+=1
-            recovered = recover_vertex_normal(
-                wrap_vertex.index,
-                clothing_mesh.uv_triangles,
-                clothing_mesh.base_surface_normals
-            )
-
-            if recovered:
-                wrap_normal=recovered
-            else:
-                raise RuntimeError(
-                    f"Cannot recover normal {wrap_vertex.index}"
-                )
-            
-        wrap_normal.normalize()
-        ######################################################
-        # BVH nearest triangle
-        ######################################################
-        tri = find_nearest_triangle(
-            local_pos,
-            wrap_normal,
-            anchor_only=anchor_only,
-            check_normals=wrap_check_normals
-        )
-
-        if tri is None:
-            empty_count["tri"] += 1
-            results.append(empty_result())
-            continue
-        ######################################################
-        # Exact triangle distance
-        ######################################################
-        #
-        # BVH has ensured the closest surface
-        #
-        # Use point-center distance
-        #
-        distance = (local_pos -tri.center).length
-
-        if distance > max_wrap_distance:
-            empty_count["distance"] += 1
-            results.append(empty_result())
-            continue
-        ######################################################
-        # DAZ reorder
-        ######################################################
-        v1=tri.vertex1
-        v2=tri.vertex2
-        v3=tri.vertex3
-
-        p1=tri.v1
-        p2=tri.v2
-        p3=tri.v3
-
-        center = (
-            p1+p2+p3
-        ) / 3.0
-
-        tangent1 = (center-p1)
-
-        if tangent1.length_squared < 1e-12:
-            empty_count["tangent1"]+=1
-            results.append(empty_result())
-            continue
-
-        normal = tri.normal.copy()
-
-        if normal.length_squared < 1e-12:
-            empty_count["normal"]+=1
-            results.append(empty_result())
-            continue
-
-        tangent2 = cast(Vector,tangent1.cross(normal))
-
-        if tangent2.length_squared < 1e-12:
-            empty_count["tangent2"]+=1
-            results.append(empty_result())
-            continue
-
-        ######################################################
-        # Projection
-        ######################################################
-        delta = (
-            local_pos-p1
-        )
-        tangent1_len2 = tangent1.length_squared
-        tangent2_len2 = tangent2.length_squared
-        normal_projection = (
-            delta.dot(normal)
-            /
-            normal.length_squared
-        )
-        tangent1_projection = (
-            delta.dot(tangent1)
-            /
-            tangent1_len2
-        )
-        tangent2_projection = (
-            delta.dot(tangent2)
-            /
-            tangent2_len2
-        )
-        ######################################################
-        # Store
-        ######################################################
-        results.append(
-            SkinWrapVertex(
-                closestTriangle=tri.original_triangle_id,
-                Vertex1=v1,
-                Vertex2=v2,
-                Vertex3=v3,
-                surfaceNormalProjection=
-                    float(normal_projection),
-                surfaceTangent1Projection=
-                    float(tangent1_projection),
-                surfaceTangent2Projection=
-                    float(tangent2_projection),
-                surfaceNormalWrapNormalDot=
-                    float(
-                        wrap_normal.dot(normal)
-                    ),
-                surfaceTangent1WrapNormalDot=
-                    float(
-                        wrap_normal.dot(tangent1)/tangent1.length_squared
-                    ),
-                surfaceTangent2WrapNormalDot=
-                    float(
-                        wrap_normal.dot(tangent2)/tangent2.length_squared
-                    )
-            )
-        )
-
-    print("===========Empty===========")
-    print("tri",empty_count["tri"])
-    print("distance",empty_count["distance"])
-    print("tangent1",empty_count["tangent1"])
-    print("normal",empty_count["normal"])
-    print("tangent2",empty_count["tangent2"])
-    print("wrap_normal",empty_count["wrap_normal"])
-    return results

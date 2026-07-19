@@ -1,18 +1,13 @@
 import os
-from typing import Literal, Optional, cast, overload
+from typing import cast
 import bpy
 from mathutils import Vector
 from ..reader.daz_surface_normals import load_surface_normals
 from .wrap_types import (
     BaseMeshData,
     MeshtoUVMapping,
-    UVTriangleInfo,
-    UVVerticesData,
-    MeshPoly,
+    MeshPoly
 )
-import bpy
-from collections import defaultdict
-from mathutils import Vector
 from collections import defaultdict
 def build_base_mesh(
     mesh: bpy.types.Mesh,
@@ -244,6 +239,7 @@ def poly_list_to_triangle_indexes(
     for mat,tri in material_triangles.items():
         result[mat]=tri
     return result
+
 def calculate_surface_normals(
     vertices: list[Vector],
     triangles: list[int]
@@ -259,7 +255,7 @@ def calculate_surface_normals(
         # Degenerate triangle
         #
         if n.length_squared < 1e-12:
-            n = n.length_squared * 1000
+            n = Vector((0,0,0))
         surface_normals.append(n)
     return surface_normals
 

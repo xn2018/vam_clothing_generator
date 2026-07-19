@@ -165,6 +165,7 @@ class SkinWrapCache:
     #
     vertex_count:int = 0
     triangle_count:int = 0
+    mesh_pointer:int = 0
     initialized:bool=False
 @dataclass(slots=True)
 class BaseMeshData:
@@ -258,3 +259,38 @@ class WrapInputVertex:
 class DAZBuildResult:
     mesh: DAZMeshData
     topology: DAZTopology
+
+@dataclass(slots=True)
+class WorkerTriangle:
+    triangle_id:int
+    original_triangle_id:int
+    vertex1:int
+    vertex2:int
+    vertex3:int
+    v1:tuple[float,float,float]
+    v2:tuple[float,float,float]
+    v3:tuple[float,float,float]
+    center:tuple[float,float,float]
+    normal:tuple[float,float,float]
+@dataclass(slots=True)
+class WorkerBVHData:
+    triangles:list[WorkerTriangle]
+    anchor_triangles:list[WorkerTriangle]
+# ============================================================
+# Data Types
+# ============================================================
+@dataclass
+class WorkerWrapVertex:
+    index:int
+    co:tuple
+    normal:tuple
+
+@dataclass(slots=True)
+class PerSkinWrapCalculationResult:
+    wrap_vertices:list[WrapInputVertex]
+    clothing_mesh:DAZMeshData
+    local_matrix:Matrix
+    normal_matrix:Matrix
+    anchor_only:bool=False
+    wrap_check_normals:bool=False
+    max_wrap_distance:float=1.0

@@ -128,15 +128,15 @@ class VAMGEN_PT_MainPanel(bpy.types.Panel):
 
         col2 = split.column()
         col2.operator(
-            "vam.ot_split",
-            icon="IMPORT",
-            text="Split Mesh"
+            "vam.ot_skinwrapcalc",
+            icon="STICKY_UVS_LOC",
+            text="CalcuSkinWrap"
         )
         col3 = box_gen.column()
         col3.scale_y = 2.0
         col3.operator(
             "vam.generate_package",
-            icon="EXPORT",
+            icon="BLENDER",
             text="Generate VAB / VAJ / VAM"
         )
         # --------------------------------------------------
