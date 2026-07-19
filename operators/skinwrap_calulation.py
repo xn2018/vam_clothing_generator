@@ -1,60 +1,77 @@
 import bpy
 import traceback
 from .operators_types import OperatorReturn
-from ..skinwrap.SkinWrapTask import create_skinwrap_task
+from ..skinwrap.SkinWrapTask import (
+    create_skinwrap_task,
+    SkinWrapState
+)
 from ..skinwrap.runtime import runtime
 class VAM_OT_SKINWRAPCALC(
     bpy.types.Operator
 ):
-    bl_idname = "vam.ot_skinwrapcalc"
-    bl_label = "calculate skinWrap"
-
+    bl_idname="vam.ot_skinwrapcalc"
+    bl_label="calculate skinWrap"
+    ##################################################
+    # Init
+    ##################################################
     def __init__(self):
         self.task=None
         self.timer=None
+    ##################################################
+    # UI refresh
+    ##################################################
+    def update_progress(
+        self,
+        context
+    ):
+        for window in (
+            context.window_manager.windows
+        ):
+            if window.screen is None:
+                continue
+            for area in window.screen.areas:
+                if area.type=="STATUSBAR":
+                    area.tag_redraw()
     ##################################################
     # Cleanup
     ##################################################
     def cleanup(
         self,
-        context
+        context,
+        reset_ready=True
     ):
         wm=context.window_manager
         #
-        # stop state
-        #
-        runtime.skinwrap_running=False
-        #
-        # progress bar
-        #
-        try:
-            wm.vam_skinwrap_progress=0.0
-        except:
-            pass
-        #
-        # timer
+        # Timer
         #
         if self.timer:
             try:
                 wm.event_timer_remove(
                     self.timer
                 )
-            except:
+            except Exception:
                 pass
             self.timer=None
         #
-        # status bar
+        # Status text
         #
         try:
             context.workspace.status_text_set(
                 None
             )
-        except:
+        except Exception:
             pass
         #
-        # task reset
+        # Runtime state
         #
+        runtime.skinwrap_running=False
+        if reset_ready:
+            runtime.skinwrap_ready=False
+        runtime.skinwrap_progress=0.0
         self.task=None
+        self.update_progress(
+            context
+        )
     ##################################################
     # Execute
     ##################################################
@@ -62,12 +79,11 @@ class VAM_OT_SKINWRAPCALC(
         self,
         context
     )->set[OperatorReturn]:
-        scene = context.scene
-        props = scene.vamgen_props
+        props=context.scene.vamgen_props
         if runtime.skinwrap_running:
             self.report(
                 {'WARNING'},
-                "skinWrap already running"
+                "SkinWrap already running"
             )
             return {
                 'CANCELLED'
@@ -75,7 +91,7 @@ class VAM_OT_SKINWRAPCALC(
         if props.genesis_mesh is None:
             self.report(
                 {'ERROR'},
-                "genesis missing"
+                "Genesis missing"
             )
             return {
                 'CANCELLED'
@@ -83,16 +99,25 @@ class VAM_OT_SKINWRAPCALC(
         if props.clothing_mesh is None:
             self.report(
                 {'ERROR'},
-                "clothing missing"
+                "Clothing missing"
             )
             return {
                 'CANCELLED'
             }
         #
-        # state
+        # Runtime state
         #
         runtime.skinwrap_ready=False
         runtime.skinwrap_running=True
+        runtime.skinwrap_progress=0.0
+        #
+        # Create task
+        #
+        #
+        # 注意:
+        # 这里现在不会执行build_daz_mesh
+        # 不会阻塞
+        #
         try:
             self.task=create_skinwrap_task(
                 props.genesis_mesh,
@@ -106,21 +131,24 @@ class VAM_OT_SKINWRAPCALC(
             )
             self.report(
                 {'ERROR'},
-                f"skinWrap init failed: {e}"
+                f"SkinWrap create failed: {e}"
             )
             return {
                 'CANCELLED'
             }
         #
-        # progress
+        # Timer
+        #
         wm=context.window_manager
-        wm.vam_skinwrap_progress=0.0
         self.timer=wm.event_timer_add(
             0.01,
             window=context.window
         )
         wm.modal_handler_add(
             self
+        )
+        self.update_progress(
+            context
         )
         return {
             'RUNNING_MODAL'
@@ -133,9 +161,8 @@ class VAM_OT_SKINWRAPCALC(
         context,
         event
     )->set[OperatorReturn]:
-        scene=context.scene
         #
-        # ESC cancel
+        # Cancel
         #
         if event.type=="ESC":
             if self.task:
@@ -162,51 +189,61 @@ class VAM_OT_SKINWRAPCALC(
                     'CANCELLED'
                 }
             try:
-                self.task.step(
-                    batch_size=64
-                )
-                
-                progress=self.task.progress
-                context.window_manager.vam_skinwrap_progress=(progress)
-
                 #
-                # finished
+                # State machine tick
+                #
+                self.task.update()
+                #
+                # Progress
+                #
+                progress=(
+                    self.task.progress
+                )
+                runtime.skinwrap_progress=(
+                    progress
+                )
+                self.update_progress(
+                    context
+                )
+                #
+                # Status bar
+                #
+                context.workspace.status_text_set(
+                    f"{self.task.state.name} "
+                    f"{progress*100:.1f}%"
+                )
+                #
+                # Failed
+                #
+                if self.task.failed:
+                    raise RuntimeError(
+                        str(
+                            self.task.error
+                        )
+                    )
+                #
+                # Finished
                 #
                 if self.task.finished:
-
-                    result=self.task.get_result()
-
-                    if any(
-                        r is None
-                        for r in result
-                    ):
-                        raise RuntimeError(
-                            "SkinWrap result contains None"
-                        )
-
+                    result=(
+                        self.task.get_result()
+                    )
                     runtime.skinwrap_result=result
                     runtime.skinwrap_ready=True
                     runtime.skinwrap_running=False
-                    #
-                    # Force UI refresh
-                    #
-                    context.window_manager.vam_skinwrap_progress=1.0
-
-                    self.cleanup(context)
-
+                    runtime.skinwrap_progress=1.0
+                    self.cleanup(
+                        context,
+                        reset_ready=False
+                    )
                     self.report(
                         {'INFO'},
                         "SkinWrap calculation completed"
                     )
-
                     return {
                         'FINISHED'
                     }
             except Exception as e:
-                #
-                # important:
-                # 捕获计算阶段异常
-                #
                 traceback.print_exc()
                 if self.task:
                     self.task.cancel()

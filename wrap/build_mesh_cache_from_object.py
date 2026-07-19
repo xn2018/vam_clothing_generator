@@ -3,7 +3,8 @@ import bpy
 from mathutils import Vector
 from mathutils.bvhtree import BVHTree
 from mathutils.kdtree import KDTree
-from .build_daz_mesh import build_daz_mesh
+
+from ..skinwrap.runtime_mesh_cache import get_genesis_daz_mesh
 from .wrap_types import (
     SkinWrapCache,
     TriangleInfo,
@@ -15,10 +16,8 @@ def build_mesh_cache_from_object(
     ##########################################################
     # Build DAZ Mesh
     ##########################################################
-    daz_mesh = build_daz_mesh(
-        obj=genesis_obj,
-        split_material=True,
-        is_body=True
+    daz_mesh = get_genesis_daz_mesh(
+        genesis_obj
     )
     mesh_data = daz_mesh.mesh
     ##########################################################

@@ -1,8 +1,6 @@
 import bpy
 from bpy.props import PointerProperty,FloatProperty
-
-from .ux.progress_bar import draw_skinwrap_progress
-
+from .skinwrap.runtime import runtime
 from .operators.skinwrap_calulation import VAM_OT_SKINWRAPCALC
 from .properties import VAMGEN_Properties
 from .ui import VAMGEN_PT_MainPanel
@@ -28,22 +26,27 @@ classes = (
     VAM_OT_SELECTVERT,
     VAM_OT_SELECTTRIANGLES
 )
-
+def draw_skinwrap_progress(self,context):
+    if not runtime.skinwrap_running:
+        return
+    progress=runtime.skinwrap_progress
+    row=self.layout.row()
+    row.progress(
+        factor=progress,
+        type="BAR",
+        text=f"SkinWrap {progress*100:.1f}%"
+    )
+    row.scale_x=2
+    
 def register():
     for cls in classes:
         bpy.utils.register_class(cls)
-
     bpy.types.Scene.vamgen_props = PointerProperty( # type: ignore
         type=VAMGEN_Properties
-    )   
-
-    bpy.types.WindowManager.vam_skinwrap_progress = FloatProperty() # type: ignore
+    )
     bpy.types.STATUSBAR_HT_header.append(draw_skinwrap_progress)
-    
 def unregister():
     if hasattr(bpy.types.Scene, "vamgen_props"):
         del bpy.types.Scene.vamgen_props # type: ignore
-    if hasattr(bpy.types.WindowManager, "vam_skinwrap_progress"):
-        del bpy.types.WindowManager.vam_skinwrap_progress # type: ignore
     for cls in reversed(classes):
         bpy.utils.unregister_class(cls)

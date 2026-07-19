@@ -191,15 +191,15 @@ class DAZTopology:
     #
     # Object
     #
-    object: bpy.types.Object
+    object: bpy.types.Object | None = None
     #
     # Mesh
     #
-    data: bpy.types.Mesh
+    data: bpy.types.Mesh | None = None
     #
     # Name
     #
-    name: str
+    name: str = ""
     #
     # Base Vertices
     #
@@ -212,6 +212,7 @@ class DAZTopology:
     uv_poly_list: list[MeshPoly] = field(default_factory=list)
     orig_uv: list[Vector] = field(default_factory=list)
     vertex_maps: list[DAZVertexMap] = field(default_factory=list)
+    
 @dataclass
 class UVVerticesData:
     #

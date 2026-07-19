@@ -2,16 +2,13 @@ from typing import cast
 import bpy
 import bmesh
 import os
-
+from ..skinwrap.runtime_mesh_cache import get_clothing_daz_mesh
 from ..skinwrap.runtime import runtime
-
 from .operators_types import OperatorReturn
 
-from ..wrap.build_daz_mesh import build_daz_mesh
 from .generate_vab import generate_vab
 from .generate_vaj import generate_vaj
 from .generate_vam import generate_vam
-
 class VAM_OT_GeneratePackage(
     bpy.types.Operator
 ):
@@ -97,10 +94,8 @@ class VAM_OT_GeneratePackage(
             {'INFO'},
             "Building mesh data..."
         )
-        dazmesh = build_daz_mesh(
-            obj=clothing_obj,
-            is_body=False,
-            split_material=True
+        dazmesh = get_clothing_daz_mesh(
+            clothing_obj
         )
         ##################################################
         # Generate VAB
@@ -171,7 +166,6 @@ class VAM_OT_IMPORT(bpy.types.Operator):
         except Exception as e:
             self.report({'ERROR'}, f"Import failed: {str(e)}")
             return {'CANCELLED'}
-        
 class VAM_OT_SELECTVERT(bpy.types.Operator):
     bl_idname = "vam.ot_selectvert"
     bl_label = "SELECT VERT"
@@ -222,7 +216,6 @@ class VAM_OT_SELECTVERT(bpy.types.Operator):
         bmesh.update_edit_mesh(me)
         self.report({'INFO'}, f"Successfully selected vertex Index: {vertex_id}")
         return {'FINISHED'}
-    
 class VAM_OT_SELECTTRIANGLES(bpy.types.Operator):
     bl_idname = "vam.ot_selecttri"
     bl_label = "SELECT TRI"
