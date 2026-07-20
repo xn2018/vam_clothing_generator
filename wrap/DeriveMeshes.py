@@ -9,6 +9,8 @@ from .wrap_types import (
     MeshPoly
 )
 from collections import defaultdict
+from ..paths import PLUGIN_ROOT
+
 def build_base_mesh(
     mesh: bpy.types.Mesh,
 ) -> BaseMeshData:
@@ -342,9 +344,7 @@ def recalculate_normals(
     """
     surface_normals:list[Vector]=[]
     if is_body:
-        addon_root_dir = os.path.abspath(os.path.curdir)
-        obj_relative_path = os.path.join("DAZExtraData", "surfaceNormals.bin")
-        target_path = os.path.join(addon_root_dir, obj_relative_path)
+        target_path = os.path.join(PLUGIN_ROOT,"DAZExtraData", "surfaceNormals.bin")
         if not os.path.exists(target_path):
             raise RuntimeError("surfaceNormals.bin file not found: {target_path}\nPlease check if the file exists!")
         surface_normals = load_surface_normals(target_path)

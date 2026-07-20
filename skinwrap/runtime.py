@@ -17,7 +17,6 @@ class VAMRuntime:
         "clothing":None,
         "mesh":None
     }
-
     #
     # Mesh Cache
     #

@@ -1,3 +1,5 @@
+from typing import Any
+
 import bpy
 from dataclasses import dataclass, field
 from enum import Enum, auto
@@ -11,6 +13,8 @@ from ..wrap.wrap_types import (
     DAZMeshData,
     WrapInputVertex
 )
+from ..skinwrap.mesh_normal_fix import find_flipped_triangles, flip_triangle_winding
+from ..skinwrap.mesh_validate import check_uv_winding
 from .skinwrap_vertex import (
     calculate_skinwrap_vertex
 )
@@ -18,6 +22,8 @@ from .skinwrap_vertex import (
 # State Machine
 ##################################################
 class SkinWrapState(Enum):
+    VALIDATE_MESH=auto()
+    FIX_NORMAL=auto()
     INIT = auto()
     BUILD_CLOTHING = auto()
     BUILD_WRAP_VERTICES = auto()
@@ -58,15 +64,13 @@ class SkinWrapTask:
         default_factory=list
     )
     calc_data:PerSkinWrapCalculationResult|None=None
+    need_fix_normal:bool=False
+    task_id:int=0
     ##################################################
     # Calculation
     ##################################################
     index:int=0
-    results:list[
-        SkinWrapVertex|None
-    ]=field(
-        default_factory=list
-    )
+    results:list[SkinWrapVertex|None]=field(default_factory=list)
     ##################################################
     # Statistics
     ##################################################
@@ -98,6 +102,12 @@ class SkinWrapTask:
                 )
             elif self.state == SkinWrapState.BUILD_CLOTHING:
                 self.build_clothing()
+            elif self.state==SkinWrapState.VALIDATE_MESH:
+                self.validate_mesh()
+            elif self.state == SkinWrapState.VALIDATE_MESH:
+                self.validate_mesh()
+            elif self.state == SkinWrapState.FIX_NORMAL:
+                self.fix_normal()
             elif self.state == SkinWrapState.BUILD_WRAP_VERTICES:
                 self.build_wrap_vertices()
             elif self.state == SkinWrapState.BUILD_CALC_DATA:
@@ -111,6 +121,43 @@ class SkinWrapTask:
             )
             raise
     ##################################################
+    # validate mesh uv
+    ##################################################
+    def fix_normal(self):
+        if self.clothing_data is None:
+            raise RuntimeError(
+                "[validate_mesh] Clothing data missing"
+            )
+        if not self.need_fix_normal:
+            self.state=(
+                SkinWrapState.BUILD_WRAP_VERTICES
+            )
+            return
+        flipped=find_flipped_triangles(
+            self.clothing_data.mesh
+        )
+        flip_triangle_winding(
+            self.clothing_data.mesh,
+            flipped
+        )
+        self.state=(
+            SkinWrapState.BUILD_WRAP_VERTICES
+        )
+    ##################################################
+    # validate mesh uv
+    ##################################################
+    def validate_mesh(self):
+        if self.clothing_data is None:
+            raise RuntimeError(
+                "[validate_mesh] Clothing data missing"
+            )
+        info=check_uv_winding(
+            self.clothing_data.mesh
+        )
+        if info["ratio"] > 0.05:
+            self.need_fix_normal=True
+        self.state=SkinWrapState.FIX_NORMAL
+    ##################################################
     # Step 1
     ##################################################
     def build_clothing(self):
@@ -123,7 +170,7 @@ class SkinWrapTask:
         )
         self.progress_value=0.1
         self.state=(
-            SkinWrapState.BUILD_WRAP_VERTICES
+            SkinWrapState.VALIDATE_MESH
         )
     ##################################################
     # Step 2
@@ -197,24 +244,30 @@ class SkinWrapTask:
             self.index,
             end
         ):
-            result,stat = (
-                calculate_skinwrap_vertex(
-                    wrap_vertex=
-                        self.calc_data.wrap_vertices[i],
-                    clothing_mesh=
-                        self.calc_data.clothing_mesh,
-                    local_matrix=
-                        self.calc_data.local_matrix,
-                    normal_matrix=
-                        self.calc_data.normal_matrix,
-                    anchor_only=
-                        self.calc_data.anchor_only,
-                    wrap_check_normals=
-                        self.calc_data.wrap_check_normals,
-                    max_wrap_distance=
-                        self.calc_data.max_wrap_distance
+            try:
+                result,stat = (
+                    calculate_skinwrap_vertex(
+                        wrap_vertex=
+                            self.calc_data.wrap_vertices[i],
+                        clothing_mesh=
+                            self.calc_data.clothing_mesh,
+                        local_matrix=
+                            self.calc_data.local_matrix,
+                        normal_matrix=
+                            self.calc_data.normal_matrix,
+                        anchor_only=
+                            self.calc_data.anchor_only,
+                        wrap_check_normals=
+                            self.calc_data.wrap_check_normals,
+                        max_wrap_distance=
+                            self.calc_data.max_wrap_distance
+                    )
                 )
-            )
+            except Exception as e:
+                self.results[i]=None
+                self.error=e
+                self.state=SkinWrapState.FAILED
+                return
             self.results[i]=result
             for k,v in stat.items():
                 self.empty_count[k]+=v

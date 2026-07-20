@@ -38,7 +38,8 @@ class VAM_OT_SKINWRAPCALC(
     def cleanup(
         self,
         context,
-        reset_ready=True
+        reset_ready=True,
+        reset_progress=True
     ):
         wm=context.window_manager
         #
@@ -67,7 +68,9 @@ class VAM_OT_SKINWRAPCALC(
         runtime.skinwrap_running=False
         if reset_ready:
             runtime.skinwrap_ready=False
-        runtime.skinwrap_progress=0.0
+        if reset_progress:
+            runtime.skinwrap_progress=0.0
+
         self.task=None
         self.update_progress(
             context
@@ -153,6 +156,7 @@ class VAM_OT_SKINWRAPCALC(
         return {
             'RUNNING_MODAL'
         }
+
     ##################################################
     # Modal
     ##################################################
@@ -182,12 +186,8 @@ class VAM_OT_SKINWRAPCALC(
         #
         if event.type=="TIMER":
             if self.task is None:
-                self.cleanup(
-                    context
-                )
-                return {
-                    'CANCELLED'
-                }
+                self.cleanup(context)
+                return {'CANCELLED'}
             try:
                 #
                 # State machine tick
@@ -199,12 +199,11 @@ class VAM_OT_SKINWRAPCALC(
                 progress=(
                     self.task.progress
                 )
-                runtime.skinwrap_progress=(
-                    progress
-                )
-                self.update_progress(
-                    context
-                )
+                if abs(
+                    progress-runtime.skinwrap_progress
+                )>0.005:
+                    runtime.skinwrap_progress=(progress)
+                    self.update_progress(context)
                 #
                 # Status bar
                 #
@@ -225,9 +224,7 @@ class VAM_OT_SKINWRAPCALC(
                 # Finished
                 #
                 if self.task.finished:
-                    result=(
-                        self.task.get_result()
-                    )
+                    result=(self.task.get_result())
                     runtime.skinwrap_result=result
                     runtime.skinwrap_ready=True
                     runtime.skinwrap_running=False

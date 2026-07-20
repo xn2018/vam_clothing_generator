@@ -1,3 +1,5 @@
+import os
+
 import bpy
 from bpy.props import PointerProperty,FloatProperty
 from .skinwrap.runtime import runtime
@@ -5,6 +7,7 @@ from .operators.skinwrap_calulation import VAM_OT_SKINWRAPCALC
 from .properties import VAMGEN_Properties
 from .ui import VAMGEN_PT_MainPanel
 from .operators.generate_package import VAM_OT_SELECTTRIANGLES, VAM_OT_SELECTVERT, VAM_OT_GeneratePackage,VAM_OT_IMPORT
+
 bl_info = {
     "name": "VaM Clothing Generator",
     "author": "shyuecc",
@@ -27,8 +30,10 @@ classes = (
     VAM_OT_SELECTTRIANGLES
 )
 def draw_skinwrap_progress(self,context):
+    
     if not runtime.skinwrap_running:
         return
+    
     progress=runtime.skinwrap_progress
     row=self.layout.row()
     row.progress(
