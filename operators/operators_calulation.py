@@ -1,24 +1,34 @@
+from typing import Optional, Union, cast
 import bpy
 import traceback
+from ..tasks.HairTask import create_hair_task
 from .operators_types import OperatorReturn
-from ..skinwrap.SkinWrapTask import (
-    create_skinwrap_task,
-    SkinWrapState
+from ..tasks.SkinWrapTask import SkinWrapTask
+from ..tasks.HairTask import HairBuildTask
+from ..tasks.SkinWrapTask import (
+    create_skinwrap_task
 )
-from ..skinwrap.runtime import runtime
+from ..RuntimeCache.runtime import runtime
 class VAM_OT_SKINWRAPCALC(
     bpy.types.Operator
 ):
     bl_idname="vam.ot_skinwrapcalc"
-    bl_label="calculate skinWrap"
+    bl_label="calculate"
+    task: Optional[
+        Union[
+            SkinWrapTask,
+            HairBuildTask
+        ]
+    ]
     ##################################################
     # Init
     ##################################################
     def __init__(self):
         self.task=None
         self.timer=None
+        self.package_type="ClothingFemale"
     ##################################################
-    # UI refresh
+    # progress refresh
     ##################################################
     def update_progress(
         self,
@@ -32,6 +42,16 @@ class VAM_OT_SKINWRAPCALC(
             for area in window.screen.areas:
                 if area.type=="STATUSBAR":
                     area.tag_redraw()
+    ##################################################
+    # UI refresh
+    ##################################################       
+    def refresh_ui(self,context):
+        for window in context.window_manager.windows:
+            screen=window.screen
+            if screen is None:
+                continue
+            for area in screen.areas:
+                area.tag_redraw()
     ##################################################
     # Cleanup
     ##################################################
@@ -67,10 +87,9 @@ class VAM_OT_SKINWRAPCALC(
         #
         runtime.skinwrap_running=False
         if reset_ready:
-            runtime.skinwrap_ready=False
+            runtime.calc_ready=False
         if reset_progress:
-            runtime.skinwrap_progress=0.0
-
+            runtime.progress=0.0
         self.task=None
         self.update_progress(
             context
@@ -83,6 +102,7 @@ class VAM_OT_SKINWRAPCALC(
         context
     )->set[OperatorReturn]:
         props=context.scene.vamgen_props
+        self.package_type = props.package_type
         if runtime.skinwrap_running:
             self.report(
                 {'WARNING'},
@@ -91,7 +111,7 @@ class VAM_OT_SKINWRAPCALC(
             return {
                 'CANCELLED'
             }
-        if props.genesis_mesh is None:
+        if props.genesis_obj is None:
             self.report(
                 {'ERROR'},
                 "Genesis missing"
@@ -99,7 +119,7 @@ class VAM_OT_SKINWRAPCALC(
             return {
                 'CANCELLED'
             }
-        if props.clothing_mesh is None:
+        if props.clothing_hair_obj is None:
             self.report(
                 {'ERROR'},
                 "Clothing missing"
@@ -110,9 +130,9 @@ class VAM_OT_SKINWRAPCALC(
         #
         # Runtime state
         #
-        runtime.skinwrap_ready=False
+        runtime.calc_ready=False
         runtime.skinwrap_running=True
-        runtime.skinwrap_progress=0.0
+        runtime.progress=0.0
         #
         # Create task
         #
@@ -122,11 +142,17 @@ class VAM_OT_SKINWRAPCALC(
         # 不会阻塞
         #
         try:
-            self.task=create_skinwrap_task(
-                props.genesis_mesh,
-                props.clothing_mesh,
-                props.anchor_only
-            )
+            if props.package_type=="HairFemale":
+                self.task=create_hair_task(
+                    props.genesis_obj,
+                    props.clothing_hair_obj
+                )
+            else:
+                self.task=create_skinwrap_task(
+                    props.genesis_obj,
+                    props.clothing_hair_obj,
+                    props.anchor_only
+                )
         except Exception as e:
             traceback.print_exc()
             self.cleanup(
@@ -156,7 +182,6 @@ class VAM_OT_SKINWRAPCALC(
         return {
             'RUNNING_MODAL'
         }
-
     ##################################################
     # Modal
     ##################################################
@@ -200,9 +225,9 @@ class VAM_OT_SKINWRAPCALC(
                     self.task.progress
                 )
                 if abs(
-                    progress-runtime.skinwrap_progress
+                    progress-runtime.progress
                 )>0.005:
-                    runtime.skinwrap_progress=(progress)
+                    runtime.progress=(progress)
                     self.update_progress(context)
                 #
                 # Status bar
@@ -224,11 +249,16 @@ class VAM_OT_SKINWRAPCALC(
                 # Finished
                 #
                 if self.task.finished:
-                    result=(self.task.get_result())
-                    runtime.skinwrap_result=result
-                    runtime.skinwrap_ready=True
+                    if self.package_type=="HairFemale":
+                        task = cast(HairBuildTask,self.task)
+                        runtime.hair_result=(task.get_result())
+                    else:
+                        task = cast(SkinWrapTask,self.task)
+                        runtime.skinwrap_result=(task.get_result())
+                    runtime.calc_ready=True
                     runtime.skinwrap_running=False
-                    runtime.skinwrap_progress=1.0
+                    runtime.progress=1.0
+                    self.refresh_ui(context)
                     self.cleanup(
                         context,
                         reset_ready=False

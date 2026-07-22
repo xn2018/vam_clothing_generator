@@ -39,7 +39,7 @@ def clean_texture_path(raw_path):
     # Fallback: if no Custom directory is present, return the normalized absolute path
     return normalized_path
 
-def get_muti_mats_dict(obj, creator, clothing_id)->list[str]:
+def get_muti_mats_dict(obj, creator, clothing_hair_id)->list[str]:
     if len(mat_section) > 0:
         return mat_section
     
@@ -69,7 +69,7 @@ def get_muti_mats_dict(obj, creator, clothing_id)->list[str]:
         if len(obj.material_slots) < 2:
             number = ""
         # Simulate the m[0] property logic
-        mat_id = f"{creatorid}:{clothing_id}Material{slot.material.name}{number}" 
+        mat_id = f"{creatorid}:{clothing_hair_id}Material{slot.material.name}{number}" 
         
         # --- 2. Create base template ---
         storable_item = {
@@ -209,19 +209,19 @@ def generate_vaj(props, output_path):
 
     Expected props fields:
     props.author_name
-    props.clothing_id
+    props.clothing_hair_id
     props.enable_plugin
     props.plugin_path
     """
 
-    prefix = f"{props.author_name}:{props.clothing_id}"
+    prefix = f"{props.author_name}:{props.clothing_hair_id}"
 
     storables = []
 
-    clothing_mesh = props.clothing_mesh
+    clothing_hair_obj = props.clothing_hair_obj
     creator = props.author_name
-    clothing_id = props.clothing_id
-    mats = get_muti_mats_dict(clothing_mesh, creator, clothing_id)
+    clothing_hair_id = props.clothing_hair_id
+    mats = get_muti_mats_dict(clothing_hair_obj, creator, clothing_hair_id)
 
     # --------------------------------------------------
     # Style
@@ -334,10 +334,7 @@ def generate_vaj(props, output_path):
 
     output_path = Path(output_path)
 
-    vaj_path = os.path.join(
-        output_path,
-        f"{props.clothing_id}.vaj"
-    )
+    vaj_path = os.path.join(output_path,f"{props.clothing_hair_id}.vaj")
 
     with open(vaj_path, "w", encoding="utf-8") as f:
         json.dump(

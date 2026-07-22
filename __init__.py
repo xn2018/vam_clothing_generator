@@ -2,8 +2,8 @@ import os
 
 import bpy
 from bpy.props import PointerProperty,FloatProperty
-from .skinwrap.runtime import runtime
-from .operators.skinwrap_calulation import VAM_OT_SKINWRAPCALC
+from .RuntimeCache.runtime import runtime
+from .operators.operators_calulation import VAM_OT_SKINWRAPCALC
 from .properties import VAMGEN_Properties
 from .ui import VAMGEN_PT_MainPanel
 from .operators.generate_package import VAM_OT_SELECTTRIANGLES, VAM_OT_SELECTVERT, VAM_OT_GeneratePackage,VAM_OT_IMPORT
@@ -31,10 +31,10 @@ classes = (
 )
 def draw_skinwrap_progress(self,context):
     
-    if not runtime.skinwrap_running:
+    if not runtime.progress:
         return
     
-    progress=runtime.skinwrap_progress
+    progress=runtime.progress
     row=self.layout.row()
     row.progress(
         factor=progress,

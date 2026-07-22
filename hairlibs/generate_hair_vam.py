@@ -2,7 +2,7 @@ import os
 import json
 
 
-def generate_vam(
+def generate_hair_vam(
         props,
         output_dir):
 
@@ -11,8 +11,7 @@ def generate_vam(
         "uid":f"{props.author_name}:{props.clothing_hair_id}",
         "displayName":props.clothing_hair_id,
         "creatorName":props.author_name,
-        "tags":"clothing",
-        "isRealItem":"true"
+        "tags":"hairs"
     }
 
     path = os.path.join(

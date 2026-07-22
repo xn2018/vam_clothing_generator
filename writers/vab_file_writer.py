@@ -1,11 +1,7 @@
 import struct
-import json
 import re
-
 import bpy
-
 from ..wrap.wrap_types import DAZMeshData, DAZTopology, SkinWrapVertex
-
 from ..operators.generate_vaj import get_muti_mats_dict
 from .dazmesh_writer import write_string
 from .dazmesh_writer import serialize_dazmesh_block
@@ -67,7 +63,7 @@ def vab_file_writer(
         clothing_obj:bpy.types.Object, 
         wrap_data:list[SkinWrapVertex], 
         author_name:str, 
-        clothing_id:str, 
+        clothing_hair_id:str, 
         topology:DAZTopology, 
         daz_mesh: DAZMeshData
     ):
@@ -85,7 +81,7 @@ def vab_file_writer(
         # 3. Write wrap data (DAZSkinWrap)
         serialize_skinwrap_composite_block(f, clothing_obj.name, wrap_data)
         
-        mats = get_muti_mats_dict(clothing_obj, author_name, clothing_id)
+        mats = get_muti_mats_dict(clothing_obj, author_name, clothing_hair_id)
         # 4. Write material options section (MaterialOptions)
         write_material_options_section(f, mats)
         

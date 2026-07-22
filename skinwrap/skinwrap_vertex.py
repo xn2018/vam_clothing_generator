@@ -11,7 +11,7 @@ from ..wrap.wrap_types import (
 EPS = 1e-12
 def calculate_skinwrap_vertex(
     wrap_vertex:WrapInputVertex,
-    clothing_mesh:DAZMeshData,
+    clothing_obj:DAZMeshData,
     local_matrix,
     normal_matrix,
     anchor_only:bool=False,
@@ -58,8 +58,8 @@ def calculate_skinwrap_vertex(
         empty_count["wrap_normal"] += 1
         recovered = recover_vertex_normal(
             wrap_vertex.index,
-            clothing_mesh.uv_triangles,
-            clothing_mesh.base_surface_normals
+            clothing_obj.uv_triangles,
+            clothing_obj.base_surface_normals
         )
         if recovered:
             wrap_normal = recovered

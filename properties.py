@@ -27,13 +27,13 @@ class VAMGEN_Properties(bpy.types.PropertyGroup):
     # Mesh
     # --------------------------------------------------
 
-    genesis_mesh: bpy.props.PointerProperty(
+    genesis_obj: bpy.props.PointerProperty(
         name="Genesis2Female",
         type=bpy.types.Object,
     ) # type: ignore
 
-    clothing_mesh: PointerProperty(
-        name="Clothing Mesh",
+    clothing_hair_obj: PointerProperty(
+        name="Clothing/Hair",
         type=bpy.types.Object,
     ) # type: ignore
 
@@ -51,8 +51,8 @@ class VAMGEN_Properties(bpy.types.PropertyGroup):
         default="shyuecc"
     ) # type: ignore
 
-    clothing_id: StringProperty(
-        name="Clothing ID",
+    clothing_hair_id: StringProperty(
+        name="Clothing/Hair ID",
         default=""
     ) # type: ignore
 

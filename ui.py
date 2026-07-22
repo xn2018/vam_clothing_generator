@@ -20,11 +20,11 @@ class VAMGEN_PT_MainPanel(bpy.types.Panel):
         )
         box.prop(
             props,
-            "genesis_mesh"
+            "genesis_obj"
         )
         box.prop(
             props,
-            "clothing_mesh"
+            "clothing_hair_obj"
         )
         box.prop(
             props,
@@ -44,7 +44,7 @@ class VAMGEN_PT_MainPanel(bpy.types.Panel):
         )
         box.prop(
             props,
-            "clothing_id"
+            "clothing_hair_id"
         )
         box.prop(
             props,
@@ -100,7 +100,7 @@ class VAMGEN_PT_MainPanel(bpy.types.Panel):
         col2.operator(
             "vam.ot_skinwrapcalc",
             icon="STICKY_UVS_LOC",
-            text="CalcSkinWrap"
+            text="CALC"
         )
         col3 = box_gen.column()
         col3.scale_y = 2.0

@@ -289,7 +289,7 @@ class WorkerWrapVertex:
 @dataclass(slots=True)
 class PerSkinWrapCalculationResult:
     wrap_vertices:list[WrapInputVertex]
-    clothing_mesh:DAZMeshData
+    clothing_obj:DAZMeshData
     local_matrix:Matrix
     normal_matrix:Matrix
     anchor_only:bool=False

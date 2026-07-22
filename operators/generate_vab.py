@@ -9,7 +9,7 @@ from ..writers.vab_file_writer import (vab_file_writer)
 def generate_vab(
             genesis: Object,
             clothing_obj: Object,
-            clothing_id: str,
+            clothing_hair_id: str,
             topology: DAZTopology,
             daz_mesh: DAZMeshData,
             wrap_data: list[SkinWrapVertex],
@@ -36,7 +36,7 @@ def generate_vab(
     print("Generating SkinWrap")
     print("===================================")
 
-    filename = (clothing_id + ".vab")
+    filename = (clothing_hair_id + ".vab")
 
     output_path = os.path.join(
         output_dir,
@@ -48,7 +48,7 @@ def generate_vab(
         clothing_obj=clothing_obj,
         wrap_data= wrap_data,
         author_name=author_name,
-        clothing_id=clothing_id,
+        clothing_hair_id=clothing_hair_id,
         topology=topology,
         daz_mesh=daz_mesh
     )

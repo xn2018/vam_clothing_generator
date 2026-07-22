@@ -3,7 +3,6 @@ import bpy
 from dataclasses import dataclass, field
 from enum import Enum, auto
 
-from ..skinwrap.runtime import runtime
 from ..wrap.bvh_wrap import calculate_skinwrap_matrix
 from ..wrap.build_daz_mesh import build_daz_mesh
 from ..wrap.build_wrap_vertices import build_wrap_vertices
@@ -14,8 +13,8 @@ from ..wrap.wrap_types import (
     SkinWrapVertex,
     WrapInputVertex
 )
-from ..skinwrap.mesh_validate import check_uv_mirror_overlap, check_uv_winding
-from .skinwrap_vertex import (
+from ..skinwrap.mesh_validate import check_uv_winding
+from ..skinwrap.skinwrap_vertex import (
     calculate_skinwrap_vertex
 )
 ##################################################
@@ -175,7 +174,7 @@ class SkinWrapTask:
             calculate_skinwrap_matrix(
                 genesis_obj=
                     self.genesis_obj,
-                clothing_mesh=
+                clothing_obj=
                     self.clothing_data.mesh,
                 wrap_vertices=
                     self.wrap_vertices,
@@ -223,8 +222,8 @@ class SkinWrapTask:
                     calculate_skinwrap_vertex(
                         wrap_vertex=
                             self.calc_data.wrap_vertices[i],
-                        clothing_mesh=
-                            self.calc_data.clothing_mesh,
+                        clothing_obj=
+                            self.calc_data.clothing_obj,
                         local_matrix=
                             self.calc_data.local_matrix,
                         normal_matrix=

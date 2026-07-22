@@ -266,7 +266,7 @@ def reorder_triangle(
 # ============================================================
 def calculate_skinwrap_matrix(
     genesis_obj: bpy.types.Object,
-    clothing_mesh: DAZMeshData,
+    clothing_obj: DAZMeshData,
     wrap_vertices: list[WrapInputVertex],
     anchor_only=False,
     wrap_check_normals=False,
@@ -279,11 +279,11 @@ def calculate_skinwrap_matrix(
         raise RuntimeError(
             "SkinWrap cache missing"
         )
-    local_matrix = (genesis_obj.matrix_world.inverted()@clothing_mesh.matrix_world)
+    local_matrix = (genesis_obj.matrix_world.inverted()@clothing_obj.matrix_world)
     normal_matrix = (local_matrix.to_3x3())
     return PerSkinWrapCalculationResult(
         wrap_vertices=wrap_vertices,
-        clothing_mesh=clothing_mesh,
+        clothing_obj=clothing_obj,
         local_matrix=local_matrix,
         normal_matrix=normal_matrix,
         anchor_only=anchor_only,

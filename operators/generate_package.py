@@ -3,8 +3,13 @@ import bmesh
 import os
 
 from typing import cast
+
+from ..hairlibs.generate_hair_vaj import generate_hair_vaj
+from ..hairlibs.generate_hair_vab import generate_hair_vab
+from ..hairlibs.generate_hair_vam import generate_hair_vam
+
 from ..skinwrap.runtime_mesh_cache import get_clothing_daz_mesh
-from ..skinwrap.runtime import runtime
+from ..RuntimeCache.runtime import runtime
 from .operators_types import OperatorReturn
 
 from .generate_vab import generate_vab
@@ -28,7 +33,7 @@ class VAM_OT_GeneratePackage(
             启用按钮
         """
         return (
-            runtime.skinwrap_ready
+            runtime.calc_ready
             and
             not runtime.skinwrap_running
         )
@@ -40,8 +45,9 @@ class VAM_OT_GeneratePackage(
         ##################################################
         # Validate
         ##################################################
-        genesis = props.genesis_mesh
-        clothing_obj = props.clothing_mesh
+        genesis = props.genesis_obj
+        clothing_hair_obj = props.clothing_hair_obj
+        package_type = props.package_type
         if genesis is None:
             self.report(
                 {'ERROR'},
@@ -50,25 +56,11 @@ class VAM_OT_GeneratePackage(
             return {
                 'CANCELLED'
             }
-        if clothing_obj is None:
+        if clothing_hair_obj is None:
             self.report(
                 {'ERROR'},
                 "Clothing mesh not selected"
             )
-            return {
-                'CANCELLED'
-            }
-        ##################################################
-        # Get SkinWrap Cache
-        ##################################################
-        from ..skinwrap.runtime import runtime
-        wrap_data = runtime.skinwrap_result
-        if wrap_data is None:
-            self.report({'ERROR'},"SkinWrap result missing")
-            #
-            # 防止状态错误
-            #
-            runtime.skinwrap_ready=False
             return {
                 'CANCELLED'
             }
@@ -82,71 +74,158 @@ class VAM_OT_GeneratePackage(
             os.makedirs(
                 output_dir
             )
-        clothing_id = props.clothing_id
+        clothing_hair_id = props.clothing_hair_id
         author_name = props.author_name
         ##################################################
-        # Build Mesh Data
-        #
-        # 注意:
-        # 这里仍然需要，因为SkinWrap只保存计算结果
-        #
+        # Hair Packing pipeline
         ##################################################
-        self.report(
-            {'INFO'},
-            "Building mesh data..."
-        )
-        dazmesh = get_clothing_daz_mesh(
-            clothing_obj
-        )
+        if package_type == "HairFemale":
+            hair_result = runtime.hair_result
+            if hair_result is None:
+                self.report({'ERROR'},"hair result missing")
+                #
+                # 防止状态错误
+                #
+                runtime.calc_ready=False
+                return {
+                    'CANCELLED'
+                }
+            ##################################################
+            # Generate VAB
+            ##################################################
+            self.report(
+                {'INFO'},
+                "Generating Hair VAB..."
+            )
+
+            print("[Hair] strands:", len(hair_result.strands))
+            print("[Hair] hair_root_to_scalp_indices:", len(hair_result.hair_root_to_scalp_indices))
+            print("[Hair] vertices", len(hair_result.vertices))
+            generate_hair_vab(
+                genesis,
+                clothing_hair_obj,
+                clothing_hair_id,
+                hair_result,
+                author_name,
+                output_dir,
+            )
+            ##################################################
+            # Generate VAJ
+            ##################################################
+            self.report(
+                {'INFO'},
+                "Generating VAJ..."
+            )
+            generate_hair_vaj(
+                hair_result,
+                props,
+                output_dir
+            )
+            ##################################################
+            # Generate VAM
+            ##################################################
+            self.report(
+                {'INFO'},
+                "Generating VAM..."
+            )
+            generate_hair_vam(
+                props,
+                output_dir
+            )
+            ##################################################
+            # Done
+            ##################################################
+            self.report(
+                {'INFO'},
+                "VaM package generated successfully"
+            )
+            return {
+                'FINISHED'
+            }
+        
         ##################################################
-        # Generate VAB
+        # clothes Packing pipeline
         ##################################################
-        self.report(
-            {'INFO'},
-            "Generating VAB..."
-        )
-        generate_vab(
-            genesis,
-            clothing_obj,
-            clothing_id,
-            dazmesh.topology,
-            dazmesh.mesh,
-            wrap_data,
-            author_name,
-            output_dir,
-        )
-        ##################################################
-        # Generate VAJ
-        ##################################################
-        self.report(
-            {'INFO'},
-            "Generating VAJ..."
-        )
-        generate_vaj(
-            props,
-            output_dir
-        )
-        ##################################################
-        # Generate VAM
-        ##################################################
-        self.report(
-            {'INFO'},
-            "Generating VAM..."
-        )
-        generate_vam(
-            props,
-            output_dir
-        )
-        ##################################################
-        # Done
-        ##################################################
-        self.report(
-            {'INFO'},
-            "VaM package generated successfully"
-        )
-        return {
-            'FINISHED'
-        }
+        else:
+            ##################################################
+            # Get SkinWrap Cache
+            ##################################################
+            # from ..RuntimeCache.runtime import runtime
+            wrap_data = runtime.skinwrap_result
+            if wrap_data is None:
+                self.report({'ERROR'},"SkinWrap result missing")
+                #
+                # 防止状态错误
+                #
+                runtime.calc_ready=False
+                return {
+                    'CANCELLED'
+                }
+            
+            ##################################################
+            # Build Mesh Data
+            #
+            # 注意:
+            # 这里仍然需要，因为SkinWrap只保存计算结果
+            #
+            ##################################################
+            self.report(
+                {'INFO'},
+                "Building mesh data..."
+            )
+            dazmesh = get_clothing_daz_mesh(
+                clothing_hair_obj
+            )
+            ##################################################
+            # Generate VAB
+            ##################################################
+            self.report(
+                {'INFO'},
+                "Generating VAB..."
+            )
+
+            generate_vab(
+                genesis,
+                clothing_hair_obj,
+                clothing_hair_id,
+                dazmesh.topology,
+                dazmesh.mesh,
+                wrap_data,
+                author_name,
+                output_dir,
+            )
+            ##################################################
+            # Generate VAJ
+            ##################################################
+            self.report(
+                {'INFO'},
+                "Generating VAJ..."
+            )
+            generate_vaj(
+                props,
+                output_dir
+            )
+            ##################################################
+            # Generate VAM
+            ##################################################
+            self.report(
+                {'INFO'},
+                "Generating VAM..."
+            )
+            generate_vam(
+                props,
+                output_dir
+            )
+            ##################################################
+            # Done
+            ##################################################
+            self.report(
+                {'INFO'},
+                "VaM package generated successfully"
+            )
+            return {
+                'FINISHED'
+            }
 # 1. Define the first button's operator
 class VAM_OT_IMPORT(bpy.types.Operator):
     bl_idname = "vam.ot_loadatom"
