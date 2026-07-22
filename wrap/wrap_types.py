@@ -295,3 +295,10 @@ class PerSkinWrapCalculationResult:
     anchor_only:bool=False
     wrap_check_normals:bool=False
     max_wrap_distance:float=1.0
+
+@dataclass
+class FlippedTriangles:
+    id:int
+    vertices: list[int]
+    loops: list[int]
+    uv: list[Vector]

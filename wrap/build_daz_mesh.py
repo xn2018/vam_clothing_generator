@@ -1,8 +1,7 @@
 import bpy
 from typing import cast
-
-from mathutils import Vector
-from .wrap_types import DAZBuildResult, DAZMeshData, DAZTopology
+from ..skinwrap.mesh_uv_fix import fix_uv_tangent_winding
+from .wrap_types import DAZBuildResult, DAZMeshData, DAZTopology, FlippedTriangles
 from .DeriveMeshes import (
     build_base_mesh,
     build_uv_mesh,
@@ -12,8 +11,6 @@ from .DeriveMeshes import (
     update_duplicate_uv_normals,
     recalculate_tangents_fast,
 )
-
-
 def build_daz_mesh(
     obj: bpy.types.Object,
     is_body:bool,
@@ -39,13 +36,11 @@ def build_daz_mesh(
     base = build_base_mesh(mesh)
     daz.base_vertices = base.base_vertices
     daz.base_poly_list = base.base_poly_list
-
     topology=DAZTopology(
         object=obj,
         data=mesh.copy(),
         name=obj.name
     )
-
     topology.base_vertices=base.base_vertices
     topology.base_poly_list=base.base_poly_list
     ##########################################################
@@ -106,7 +101,6 @@ def build_daz_mesh(
         n.copy()
         for n in daz.morphed_uv_normals
     ]
-
     ##########################################################
     # UV Tangents
     ##########################################################
@@ -118,6 +112,7 @@ def build_daz_mesh(
             uv=daz.orig_uv
         )
     )
+
     daz.morphed_uv_tangents = [
         t.copy()
         for t in daz.uv_tangents
@@ -148,7 +143,6 @@ def build_daz_mesh(
         False
         for _ in daz.morphed_uv_vertices
     ]
-
     return DAZBuildResult(
         mesh=daz,
         topology=topology

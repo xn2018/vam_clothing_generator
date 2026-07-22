@@ -1,7 +1,7 @@
 from enum import auto
 from typing import Optional
 
-from ..wrap.wrap_types import DAZBuildResult, DAZMeshData, DAZTopology, SkinWrapVertex
+from ..wrap.wrap_types import DAZBuildResult, DAZMeshData, DAZTopology, FlippedTriangles, SkinWrapVertex
 
 class VAMRuntime:
     skinwrap_running: bool = False
@@ -26,6 +26,7 @@ class VAMRuntime:
     )
     clothing_object_name:str=""
     clothing_mesh_dirty:bool=False
+    clothing_flipped: list[FlippedTriangles]
     genesis_daz_mesh:DAZBuildResult=DAZBuildResult(
         mesh=DAZMeshData(),
         topology=DAZTopology()

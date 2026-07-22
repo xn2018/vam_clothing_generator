@@ -1,20 +1,20 @@
-from typing import Any
-
+from typing import cast
 import bpy
 from dataclasses import dataclass, field
 from enum import Enum, auto
+
+from ..skinwrap.runtime import runtime
 from ..wrap.bvh_wrap import calculate_skinwrap_matrix
 from ..wrap.build_daz_mesh import build_daz_mesh
 from ..wrap.build_wrap_vertices import build_wrap_vertices
 from ..wrap.wrap_types import (
     DAZBuildResult,
+    FlippedTriangles,
     PerSkinWrapCalculationResult,
     SkinWrapVertex,
-    DAZMeshData,
     WrapInputVertex
 )
-from ..skinwrap.mesh_normal_fix import find_flipped_triangles, flip_triangle_winding
-from ..skinwrap.mesh_validate import check_uv_winding
+from ..skinwrap.mesh_validate import check_uv_mirror_overlap, check_uv_winding
 from .skinwrap_vertex import (
     calculate_skinwrap_vertex
 )
@@ -22,9 +22,9 @@ from .skinwrap_vertex import (
 # State Machine
 ##################################################
 class SkinWrapState(Enum):
-    VALIDATE_MESH=auto()
-    FIX_NORMAL=auto()
     INIT = auto()
+    VALIDATE_MESH=auto()
+    FIX_UV=auto()
     BUILD_CLOTHING = auto()
     BUILD_WRAP_VERTICES = auto()
     BUILD_CALC_DATA = auto()
@@ -64,8 +64,13 @@ class SkinWrapTask:
         default_factory=list
     )
     calc_data:PerSkinWrapCalculationResult|None=None
-    need_fix_normal:bool=False
     task_id:int=0
+    ##################################################
+    # uv winding and normal state
+    ##################################################
+    need_fix_normal:bool=False
+    need_fix_uv:bool=False
+    flipped_uv_triangles:list[FlippedTriangles]|None=None
     ##################################################
     # Calculation
     ##################################################
@@ -97,17 +102,11 @@ class SkinWrapTask:
             return
         try:
             if self.state == SkinWrapState.INIT:
-                self.state = (
-                    SkinWrapState.BUILD_CLOTHING
-                )
-            elif self.state == SkinWrapState.BUILD_CLOTHING:
-                self.build_clothing()
-            elif self.state==SkinWrapState.VALIDATE_MESH:
-                self.validate_mesh()
+                self.state = (SkinWrapState.VALIDATE_MESH)
             elif self.state == SkinWrapState.VALIDATE_MESH:
                 self.validate_mesh()
-            elif self.state == SkinWrapState.FIX_NORMAL:
-                self.fix_normal()
+            elif self.state == SkinWrapState.BUILD_CLOTHING:
+                self.build_clothing()
             elif self.state == SkinWrapState.BUILD_WRAP_VERTICES:
                 self.build_wrap_vertices()
             elif self.state == SkinWrapState.BUILD_CALC_DATA:
@@ -123,40 +122,15 @@ class SkinWrapTask:
     ##################################################
     # validate mesh uv
     ##################################################
-    def fix_normal(self):
-        if self.clothing_data is None:
-            raise RuntimeError(
-                "[validate_mesh] Clothing data missing"
-            )
-        if not self.need_fix_normal:
-            self.state=(
-                SkinWrapState.BUILD_WRAP_VERTICES
-            )
-            return
-        flipped=find_flipped_triangles(
-            self.clothing_data.mesh
-        )
-        flip_triangle_winding(
-            self.clothing_data.mesh,
-            flipped
-        )
-        self.state=(
-            SkinWrapState.BUILD_WRAP_VERTICES
-        )
-    ##################################################
-    # validate mesh uv
-    ##################################################
     def validate_mesh(self):
-        if self.clothing_data is None:
-            raise RuntimeError(
-                "[validate_mesh] Clothing data missing"
-            )
-        info=check_uv_winding(
-            self.clothing_data.mesh
-        )
-        if info["ratio"] > 0.05:
-            self.need_fix_normal=True
-        self.state=SkinWrapState.FIX_NORMAL
+        mesh = cast(bpy.types.Mesh,self.clothing_obj.data)
+        winding=check_uv_winding(mesh)
+
+        if winding["ratio"]>0.05:
+            self.need_fix_uv=True
+            print("The inverted UVs have been found. Please check your clothing mesh UVs.")
+        self.progress_value=0.1
+        self.state=SkinWrapState.BUILD_CLOTHING
     ##################################################
     # Step 1
     ##################################################
@@ -168,9 +142,9 @@ class SkinWrapTask:
                 split_material=True
             )
         )
-        self.progress_value=0.1
+        self.progress_value=0.3
         self.state=(
-            SkinWrapState.VALIDATE_MESH
+            SkinWrapState.BUILD_WRAP_VERTICES
         )
     ##################################################
     # Step 2
@@ -185,7 +159,7 @@ class SkinWrapTask:
                 self.clothing_data.mesh
             )
         )
-        self.progress_value=0.2
+        self.progress_value=0.4
         self.state=(
             SkinWrapState.BUILD_CALC_DATA
         )
@@ -218,7 +192,7 @@ class SkinWrapTask:
             for _
             in self.wrap_vertices
         ]
-        self.progress_value=0.25
+        self.progress_value=0.5
         self.state=(
             SkinWrapState.CALCULATE_VERTEX
         )

@@ -10,7 +10,6 @@ from .wrap_types import (
 )
 from collections import defaultdict
 from ..paths import PLUGIN_ROOT
-
 def build_base_mesh(
     mesh: bpy.types.Mesh,
 ) -> BaseMeshData:
@@ -26,7 +25,6 @@ def build_base_mesh(
                 vertices=list(poly.vertices) # type: ignore
             )
         )
-
     return BaseMeshData(
         base_vertices=base_vertices,
         base_poly_list=base_poly_list
@@ -71,81 +69,102 @@ def build_uv_mesh(
     mesh: bpy.types.Mesh,
     uv_layer: bpy.types.MeshUVLoopLayer,
 ):
+    #
+    # Base vertex count
+    #
     base_vertex_count = len(mesh.vertices)
+    ##########################################################
+    # UV Vertices
     #
-    # UVVertices
+    # IMPORTANT:
+    # UV vertex index is independent from base vertex index
+    ##########################################################
+    uv_vertices = []
+    ##########################################################
+    # Original UV coordinates
+    ##########################################################
+    orig_uv = []
+    ##########################################################
+    # Mapping:
     #
-    uv_vertices = [
-        mesh.vertices[i].co.copy()
-        for i in range(base_vertex_count)
-    ]
+    # UV vertex -> base vertex
     #
-    # OrigUV
-    #
-    orig_uv = [
-        Vector((0.0, 0.0))
-        for _ in range(base_vertex_count)
-    ]
-    #
-    # VertexMap
-    #
+    ##########################################################
     vertex_maps = []
+    ##########################################################
+    # Cache:
     #
-    # (baseIndex,u,v)->uvIndex
+    # (base vertex, u, v)
+    #       |
+    #       v
+    # uv vertex index
     #
+    ##########################################################
     uv_map = {}
-    #
+    ##########################################################
     # first uv vertex of base vertex
     #
+    # used by DAZ duplicate mapping
+    ##########################################################
     first_uv = {}
-    #
-    # UV PolyList
-    #
+    ##########################################################
+    # UV polygons
+    ##########################################################
     uv_poly_list = []
-    #
-    # build
-    #
+    ##########################################################
+    # Build UV mesh
+    ##########################################################
     for poly in mesh.polygons:
         uv_indices = []
         for loop_index in poly.loop_indices:
             loop = mesh.loops[loop_index]
             base_index = loop.vertex_index
             uv = uv_layer.data[loop_index].uv
+            #
+            # UV vertex identity
+            #
             key = (
                 base_index,
-                round(uv.x, 8),
-                round(uv.y, 8),
+                round(uv.x,8),
+                round(uv.y,8),
             )
             #
-            # already exists
+            # Existing UV vertex
             #
             if key in uv_map:
                 uv_index = uv_map[key]
+            #
+            # New UV vertex
+            #
             else:
                 #
-                # first uv vertex
+                # ALWAYS create new UV vertex
+                #
+                uv_index = len(uv_vertices)
+                uv_map[key] = uv_index
+                #
+                # Position
+                #
+                uv_vertices.append(
+                    mesh.vertices[
+                        base_index
+                    ].co.copy()
+                )
+                #
+                # UV
+                #
+                orig_uv.append(
+                    uv.copy()
+                )
+                #
+                # First UV of this base vertex
                 #
                 if base_index not in first_uv:
-                    uv_index = base_index
                     first_uv[base_index] = uv_index
-                    uv_map[key] = uv_index
-                    orig_uv[uv_index] = uv.copy()
                 #
-                # duplicated uv vertex
+                # Duplicate UV vertex
                 #
                 else:
-                    uv_index = len(uv_vertices)
-                    uv_map[key] = uv_index
-                    #
-                    # DAZ:
-                    # duplicate vertex position
-                    #
-                    uv_vertices.append(
-                        mesh.vertices[base_index].co.copy()
-                    )
-                    orig_uv.append(
-                        uv.copy()
-                    )
                     vertex_maps.append(
                         MeshtoUVMapping(
                             fromvert=first_uv[base_index],
@@ -153,19 +172,15 @@ def build_uv_mesh(
                             polyindex=poly.index,
                         )
                     )
-            uv_indices.append(uv_index)
+            uv_indices.append(
+                uv_index
+            )
         uv_poly_list.append(
             MeshPoly(
                 materialNum=poly.material_index,
                 vertices=uv_indices,
             )
         )
-    #
-    # Official:
-    # duplicate positions
-    #
-    for vm in vertex_maps:
-        uv_vertices[vm.tovert] = uv_vertices[vm.fromvert].copy()
 
     return (
         uv_vertices,
@@ -241,7 +256,6 @@ def poly_list_to_triangle_indexes(
     for mat,tri in material_triangles.items():
         result[mat]=tri
     return result
-
 def calculate_surface_normals(
     vertices: list[Vector],
     triangles: list[int]
@@ -260,7 +274,6 @@ def calculate_surface_normals(
             n = Vector((0,0,0))
         surface_normals.append(n)
     return surface_normals
-
 def calculate_vertex_normals(
     vertex_count: int,
     triangles: list[int],
@@ -315,7 +328,6 @@ def calculate_vertex_normals(
             marker[c]=True
         else:
             normals[c]+=n
- 
     ##################################################
     # fallback
     ##################################################
@@ -331,7 +343,6 @@ def calculate_vertex_normals(
             else:
                 normals[i]=Vector((0,0,1))
     return normals
-
 def recalculate_normals(
     triangles: list[int],
     vertices: list[Vector],
@@ -353,7 +364,6 @@ def recalculate_normals(
             vertices,
             triangles
         )
-
     vertex_normals = calculate_vertex_normals(
         len(vertices),
         triangles,
