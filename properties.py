@@ -20,6 +20,10 @@ PACKAGE_TYPES = [
     ("HairNeutral", "HairNeutral", ""),
 ]
 
+HAIR_TYPES = [
+    ("Particles", "Particles", ""),
+    ("Curve", "Curve", ""),
+]
 
 class VAMGEN_Properties(bpy.types.PropertyGroup):
 
@@ -62,6 +66,11 @@ class VAMGEN_Properties(bpy.types.PropertyGroup):
         default="ClothingFemale"
     ) # type: ignore
 
+    hair_type: EnumProperty(
+        name="Hair Type",
+        items=HAIR_TYPES,
+        default="Particles"
+    ) # type: ignore
     # --------------------------------------------------
     # VAJ
     # --------------------------------------------------
@@ -92,7 +101,9 @@ class VAMGEN_Properties(bpy.types.PropertyGroup):
     ) # type: ignore
     
     triangles_id: IntProperty(
-        name="Vertex ID",
+        name="Triangles ID",
         default=0,
         min=0
     ) # type: ignore
+    
+    

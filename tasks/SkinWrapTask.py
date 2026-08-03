@@ -317,20 +317,39 @@ class SkinWrapTask:
 ##################################################
 def create_skinwrap_task(
     genesis_obj:bpy.types.Object,
-    clothing_obj:bpy.types.Object,
+    clothing_hair_obj:bpy.types.Object,
     anchor_only=False,
     wrap_check_normals=False,
     max_wrap_distance=1.0
 ):
+    if not clothing_hair_obj.particle_systems:
+                        raise RuntimeError(
+                            "Object has no particle system"
+                        )
+                
+    psys = (clothing_hair_obj.particle_systems.active)
+    if psys is None:
+        raise RuntimeError(
+            "No active particle system"
+        )
+    
+    if psys.settings.type != 'HAIR':
+        raise TypeError(
+            "Particle system must be HAIR"
+        )
+
+    # -------------------------------------------------------------
+    # 关键步骤：获取当前上下文的依赖图（Depsgraph）和求值后的物体
+    # -------------------------------------------------------------
+    depsgraph = bpy.context.evaluated_depsgraph_get()
+    eval_obj = clothing_hair_obj.evaluated_get(depsgraph)
+    # 从求值后的物体中获取激活的粒子系统
+    hair_particles = eval_obj.particle_systems.active
+
     return SkinWrapTask(
-        genesis_obj=
-            genesis_obj,
-        clothing_obj=
-            clothing_obj,
-        anchor_only=
-            anchor_only,
-        wrap_check_normals=
-            wrap_check_normals,
-        max_wrap_distance=
-            max_wrap_distance
+        genesis_obj=genesis_obj,
+        clothing_obj=clothing_hair_obj,
+        anchor_only=anchor_only,
+        wrap_check_normals=wrap_check_normals,
+        max_wrap_distance=max_wrap_distance
     )

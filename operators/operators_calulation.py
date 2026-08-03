@@ -9,9 +9,7 @@ from ..tasks.SkinWrapTask import (
     create_skinwrap_task
 )
 from ..RuntimeCache.runtime import runtime
-class VAM_OT_SKINWRAPCALC(
-    bpy.types.Operator
-):
+class VAM_OT_SKINWRAPCALC(bpy.types.Operator):
     bl_idname="vam.ot_skinwrapcalc"
     bl_label="calculate"
     task: Optional[
@@ -145,7 +143,8 @@ class VAM_OT_SKINWRAPCALC(
             if props.package_type=="HairFemale":
                 self.task=create_hair_task(
                     props.genesis_obj,
-                    props.clothing_hair_obj
+                    props.clothing_hair_obj,
+                    5
                 )
             else:
                 self.task=create_skinwrap_task(

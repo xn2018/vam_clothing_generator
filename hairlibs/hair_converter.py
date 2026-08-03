@@ -1,360 +1,481 @@
+from dataclasses import dataclass
 from typing import cast
 import bpy
 from mathutils import Vector
-from mathutils.kdtree import KDTree
 from .daz_hair_data import DAZHairData
+from .particle_hair_importer import ParticleHairImporter
+@dataclass
+class DAZHairRoot:
+    particle_index:int
+    position:Vector
+    particle:bpy.types.Particle
 #=============================
 # 1.find_hair_root
 #=============================
-def find_hair_root(clothing_hair_obj):
+def find_hair_root(
+    scalp_obj:bpy.types.Object,
+    eval_psys:bpy.types.ParticleSystem|None
+)->list[DAZHairRoot]:
     """
-    Find hair roots from curve splines.
-    Each spline first point is treated as root.
+    Find hair roots from Blender Particle Hair.
+    Particle:
+        particle
+            |
+            + hair_keys[0]
+                    |
+                    + root position
     return:
         [
             {
-              spline_index:int,
-              position:Vector,
-              spline:Object
+                particle_index:int,
+                position:Vector,
+                particle:Object
             }
         ]
     """
     roots=[]
-    _curve=clothing_hair_obj.data
-    for index,spline in enumerate(_curve.splines):
-        if spline.type == 'BEZIER':
-            if len(spline.bezier_points)==0:
-                continue
-            p=spline.bezier_points[0]
-            co=p.co
-        else:
-            if len(spline.points)==0:
-                continue
-            p=spline.points[0]
-            co=Vector(
-                (
-                    p.co.x,
-                    p.co.y,
-                    p.co.z
-                )
-            )
+    if eval_psys is None:
+        raise Exception("eval_psys is None, try to using curve mode")
+    for index,particle in enumerate(eval_psys.particles):
+        #
+        # particle hair keys
+        #
+        keys = particle.hair_keys
+        if len(keys)==0:
+            print("no hair keys found!")
+            continue
+        #
+        # first key = hair root
+        #
+        root_local = keys[0].co
+        #
         # object local -> world
-        world_pos = (
-            clothing_hair_obj.matrix_world
-            @
-            co
-        )
+        #
+        root_world = (scalp_obj.matrix_world@root_local)
         roots.append(
-            {
-                "spline_index":index,
-                "position":world_pos,
-                "spline":spline
-            }
+            DAZHairRoot(
+                particle_index=index,
+                position=root_world,
+                particle=particle
+            )
         )
     return roots
-#=============================
-# 2.find_nearest_scalp_vertex
-#=============================
-def find_nearest_scalp_vertex(
-        hair_roots,
-        genesis_obj:bpy.types.Object,
-        group_name="scalp"
-):
-    mesh=cast(bpy.types.Mesh,genesis_obj.data)
-    vg=genesis_obj.vertex_groups.get(
-        group_name
-    )
-    if vg is None:
-        raise Exception(
-            f"Missing {group_name}"
-        )
-    scalp_vertices=[]
-    for v in mesh.vertices:
-        for g in v.groups:
-            if g.group==vg.index:
-                scalp_vertices.append(
-                    v.index
-                )
-                break
-    if not scalp_vertices:
-        raise Exception(
-            "Empty scalp group"
-        )
-    kd=KDTree(
-        len(scalp_vertices)
-    )
-    for vid in scalp_vertices:
-        co=(
-            genesis_obj.matrix_world
-            @
-            mesh.vertices[vid].co
-        )
-        kd.insert(
-            co,
-            vid
-        )
-    kd.balance()
-    result=[]
-    for root in hair_roots:
-        co=root["position"]
-        nearest=kd.find(
-            co
-        )
-        result.append(
-            {
-                "spline_index":
-                    root["spline_index"],
-                "scalp_index":
-                    nearest[1],
-                "distance":
-                    nearest[2],
-                "position":
-                    co
-            }
-        )
-    return result
+# ==========================================================
+# sample curve
+# ==========================================================
 def sample_spline(
         obj,
         spline,
         segments
 ):
     """
-    Sample Blender Curve Spline
-    Return world-space points
+    Sample Blender Curve spline
+    into fixed points.
+    Return:
+        list[Vector(world)]
     """
-    if segments < 2:
-        raise ValueError(
-            "segments must >= 2"
-        )
     points=[]
-    # =================================================
-    # Bezier
-    # =================================================
-    if spline.type == 'BEZIER':
-        bp = spline.bezier_points
-        count = len(bp)
-        if count < 2:
+    #
+    # BEZIER
+    #
+    if spline.type=="BEZIER":
+        bezier=spline.bezier_points
+        if len(bezier)<2:
             return points
-        for i in range(segments):
-            t = (
-                i /
-                float(segments-1)
+        #
+        # only support first-last
+        # cubic spline
+        #
+        p0=bezier[0]
+        p3=bezier[-1]
+        for i in range(
+            segments
+        ):
+            t=i/(segments-1)
+            a=(
+                p0.co *
+                (1-t)**3
             )
-            # convert global t to segment
-            ft = t * (count-1)
-            seg = min(
-                int(ft),
-                count-2
+            b=(
+                p0.handle_right *
+                3 *
+                (1-t)**2 *
+                t
             )
-            local_t = (
-                ft-seg
+            c=(
+                p3.handle_left *
+                3 *
+                (1-t) *
+                t*t
             )
-            p0 = bp[seg]
-            p1 = bp[seg+1]
-            co = (
-                (1-local_t)**3 * p0.co
-                +
-                3*(1-local_t)**2*local_t *
-                (
-                    p0.co +
-                    p0.handle_right -
-                    p0.co
-                )
-                +
-                3*(1-local_t)*local_t**2 *
-                (
-                    p1.co -
+            d=(
+                p3.co *
+                t**3
+            )
+            co=a+b+c+d
+            points.append(
+                obj.matrix_world @ co
+            )
+    #
+    # POLY
+    #
+    else:
+        src=[]
+        for p in spline.points:
+            src.append(
+                Vector(
                     (
-                        p1.co -
-                        p1.handle_left
+                        p.co.x,
+                        p.co.y,
+                        p.co.z
                     )
                 )
-                +
-                local_t**3*p1.co
             )
-            points.append(
-                obj.matrix_world @ co
-            )
-    # =================================================
-    # Poly
-    # =================================================
-    elif spline.type == 'POLY':
-        p=spline.points
-        count=len(p)
-        if count < 2:
-            return points
-        for i in range(segments):
-            t=(
-                i /
-                float(segments-1)
-            )
-            ft=t*(count-1)
-            idx=min(
-                int(ft),
-                count-2
-            )
-            lt=ft-idx
-            a=Vector(
-                (
-                    p[idx].co.x,
-                    p[idx].co.y,
-                    p[idx].co.z
-                )
-            )
-            b=Vector(
-                (
-                    p[idx+1].co.x,
-                    p[idx+1].co.y,
-                    p[idx+1].co.z
-                )
-            )
-            co=a.lerp(
-                b,
-                lt
-            )
-            points.append(
-                obj.matrix_world @ co
-            )
-    else:
-        raise RuntimeError(
-            f"Unsupported spline type: {spline.type}"
-        )
-    return points
-#=============================
-# 3.convert_to_dazhair
-#=============================
-# =========================================================
-# Convert Blender Curve -> DAZHairData
-# =========================================================
-def convert_to_dazhair(
-        clothing_hair_obj,
-        root_mapping,
-        segments=16
-):
-    """
-    Convert Blender curve hair into
-    RuntimeHairGeometryCreator format.
-    Parameters
-    ----------
-    clothing_hair_obj:
-        Blender Curve object
-    root_mapping:
-        result from find_nearest_scalp_vertex()
-        [
-            {
-                spline_index:int,
-                scalp_index:int,
-                distance:float,
-                position:Vector
-            }
-        ]
-    segments:
-        points per hair strand
-    Return
-    ------
-    DAZHairData
-    """
-    data = DAZHairData()
-    data.name = (
-        clothing_hair_obj.name
-    )
-    data.segments = segments
-    curve = (
-        clothing_hair_obj.data
-    )
-    # -------------------------------------------------
-    # build spline -> scalp map
-    # -------------------------------------------------
-    scalp_map={}
-    for item in root_mapping:
-        scalp_map[
-            item["spline_index"]
-        ] = item["scalp_index"]
-    # -------------------------------------------------
-    # build strands
-    # -------------------------------------------------
-    for index, spline in enumerate(
-            curve.splines
-    ):
-        #
-        # sample curve
-        #
-        points = sample_spline(
-            clothing_hair_obj,
-            spline,
+        points=sample_polyline(
+            [
+                obj.matrix_world @ p
+                for p in src
+            ],
             segments
         )
-        #
-        # find scalp vertex
-        #
-        scalp_index = (
-            scalp_map.get(
-                index,
-                -1
+    return points
+def sample_polyline(
+        points,
+        count
+):
+    """
+    Resample curve points
+    """
+    if len(points)<2:
+        return points
+    result=[]
+    total=len(points)-1
+    for i in range(count):
+        t=i/(count-1)
+        pos=t*total
+        index=int(pos)
+        factor=pos-index
+        if index>=total:
+            result.append(
+                points[-1]
             )
+        else:
+            p1=points[index]
+            p2=points[index+1]
+            result.append(
+                p1.lerp(
+                    p2,
+                    factor
+                )
+            )
+    return result
+# ==========================================================
+# Convert Curve hair
+# ==========================================================
+def convert_to_dazhair(
+        scalp_obj,
+        root_mapping
+    ):
+        scalp_mesh=cast(
+            bpy.types.Mesh,
+            scalp_obj.data
         )
+        data=DAZHairData()
+        data.set_scalp_vertex_count(
+            len(scalp_mesh.vertices)
+        )
+        data.init_strands()
+        importer=ParticleHairImporter(
+            scalp_obj
+        )
+        particles=importer.extract()
         #
-        # create strand
+        # set segments
+        #
+        data.segments = (
+            importer.segments
+        )
+        print(
+            "Particle hair segments:",
+            data.segments
+        )
+        if len(particles)!=len(root_mapping):
+            raise RuntimeError(
+                f"Particle count {len(particles)} "
+                f"mapping {len(root_mapping)}"
+            )
+        for particle,map_index in zip(
+            particles,
+            root_mapping
+        ):
+            data.add_strand(
+                scalp_index=map_index,
+                vertices=particle.vertices,
+                weights=particle.weights
+            )
+        #
+        # calculate average segment length
+        #
+        data.calculate_segment_length()
+        data.build_rigidities()
+        data.hair_root_to_scalp_indices=(
+            root_mapping
+        )
+        return data
+#==================================
+# resample_particle_strand
+#==================================
+def resample_particle_strand(
+        vertices,
+        weights,
+        count
+):
+    if len(vertices)<2:
+        return vertices,weights
+    result_vertices=[]
+    result_weights=[]
+    total=len(vertices)-1
+    for i in range(count):
+        t=i/(count-1)
+        pos=t*total
+        index=int(pos)
+        factor=pos-index
+        if index>=total:
+            result_vertices.append(
+                vertices[-1]
+            )
+            result_weights.append(
+                weights[-1]
+            )
+        else:
+            p1=vertices[index]
+            p2=vertices[index+1]
+            result_vertices.append(
+                p1.lerp(
+                    p2,
+                    factor
+                )
+            )
+            w1=weights[index]
+            w2=weights[index+1]
+            result_weights.append(
+                w1+(w2-w1)*factor
+            )
+    return (
+        result_vertices,
+        result_weights
+    )
+#==================================
+# convert_particle_hair_to_dazhair
+#==================================
+def sample_weights(
+        weights,
+        count
+):
+    if len(weights)==count:
+        return weights
+    if len(weights)<2:
+        return [
+            weights[0]
+        ] * count
+    result=[]
+    total=len(weights)-1
+    for i in range(count):
+        t=i/(count-1)
+        pos=t*total
+        idx=int(pos)
+        factor=pos-idx
+        if idx>=total:
+            result.append(
+                weights[-1]
+            )
+        else:
+            value=(
+                weights[idx]*(1-factor)
+                +
+                weights[idx+1]*factor
+            )
+            result.append(
+                value
+            )
+    return result
+#======================================
+# convert_particle_hair_to_dazhair
+#======================================
+def convert_particle_hair_to_dazhair(
+        hair_psys:bpy.types.ParticleSystem | None,
+        scalp_obj:bpy.types.Object,
+        root_mapping:list[int],
+        segments:int=5
+    ):
+    """
+    Convert Blender Particle Hair
+    to DAZHairData
+    Blender Particle Hair
+        |
+        +-- particle
+              |
+              +-- hair_keys
+                    |
+                    +-- co
+                    +-- weight
+    VaM RuntimeHairGeometryCreator
+        |
+        +-- strands
+              |
+              +-- vertices
+              +-- rigidities
+    """
+    from .daz_hair_data import DAZHairData
+    if hair_psys is None:
+        raise RuntimeError(
+            "Particle system is None"
+        )
+    data=DAZHairData()
+    #
+    # segments
+    #
+    
+    data.segments = len(hair_psys.particles[0].hair_keys) - 1
+    #
+    # scalp vertex count
+    #
+    scalp_mesh = cast(
+        bpy.types.Mesh,
+        scalp_obj.data
+    )
+    data.set_scalp_vertex_count(
+        len(
+            scalp_mesh.vertices
+        )
+    )
+    #
+    # create empty strands
+    #
+    data.init_strands()
+    particles = hair_psys.particles
+    if len(root_mapping)!=len(particles):
+        raise RuntimeError(
+            f"Root mapping {len(root_mapping)} "
+            f"!= particles {len(particles)}"
+        )
+    used_scalp=set()
+    #
+    # particle -> strand
+    #
+    for particle_index,particle in enumerate(
+        particles
+    ):
+        scalp_index = root_mapping[
+            particle_index
+        ]
+        #
+        # invalid root
+        #
+        if scalp_index < 0:
+            continue
+        #
+        # avoid duplicate scalp strand
+        #
+        if scalp_index in used_scalp:
+            print(
+                "[Hair] duplicate scalp:",
+                scalp_index
+            )
+            continue
+        used_scalp.add(
+            scalp_index
+        )
+        vertices=[]
+        weights=[]
+        #
+        # particle hair keys
+        #
+        for key in particle.hair_keys:
+            #
+            # particle object local
+            # ->
+            # world
+            #
+            world_pos = (
+                scalp_obj.matrix_world
+                @
+                key.co
+            )
+            vertices.append(
+                world_pos
+            )
+            weights.append(
+                float(
+                    key.weight
+                )
+            )
+        if len(vertices)<2:
+            continue
+        #
+        # resample to VaM segments
+        #
+        if len(vertices)!=segments:
+            vertices,weights = (
+                resample_particle_strand(
+                    vertices,
+                    weights,
+                    segments
+                )
+            )
+        #
+        # force root rigidity
+        #
+        if weights:
+            weights[0]=1.0
+        #
+        # add strand
         #
         data.add_strand(
-            points,
-            scalp_index
+            scalp_index=scalp_index,
+            vertices=vertices,
+            weights=weights
         )
-        #
-        # root -> scalp
-        #
-        data.hair_root_to_scalp_indices.append(
-            scalp_index
-        )
-    # -------------------------------------------------
-    # geometry build
-    # -------------------------------------------------
+    #
+    # validate
+    #
+    for strand in data.strands:
+        if not strand.vertices:
+            continue
+        if len(strand.vertices)!=segments:
+            raise RuntimeError(
+                "Invalid strand segment count"
+            )
+        if len(strand.vertices)!=len(strand.weights):
+            raise RuntimeError(
+                "Vertex/weight mismatch"
+            )
+    #
+    # calculate length
+    #
     data.calculate_segment_length()
-    data.build_vertex_buffer()
-    # -------------------------------------------------
-    # physics
-    # -------------------------------------------------
+    #
+    # painted rigidity
+    #
     data.build_rigidities()
     #
-    # distance joints
+    # RuntimeHairGeometryCreator mapping
     #
-    if hasattr(
-        data,
-        "build_distance_joints"
-    ):
-        data.build_distance_joints()
-    #
-    # point joints
-    #
-    if hasattr(
-        data,
-        "build_point_joints"
-    ):
-        data.build_point_joints()
-    #
-    # render index
-    #
-    if hasattr(
-        data,
-        "build_indices"
-    ):
-        data.build_indices()
-    #
-    # render particles
-    #
-    if hasattr(
-        data,
-        "build_render_particles"
-    ):
-        data.build_render_particles()
-    # -------------------------------------------------
-    # validation
-    # -------------------------------------------------
-    errors = data.validate()
-    if errors:
-        raise RuntimeError(
-            "DAZHair validation failed:\n"
-            +
-            "\n".join(errors)
-        )
+    data.hair_root_to_scalp_indices = [
+        strand.scalp_index
+        for strand in data.strands
+        if strand.vertices
+    ]
+    print(
+        "[Hair] strands:",
+        len(data.hair_root_to_scalp_indices)
+    )
+    print(
+        "[Hair] vertices:",
+        len(data.vertices)
+    )
+    print(
+        "[Hair] rigidities:",
+        len(data.rigidities)
+    )
     return data

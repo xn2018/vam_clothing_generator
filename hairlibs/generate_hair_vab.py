@@ -47,11 +47,7 @@ def generate_hair_vab(
     #
     vab_hair_file_writer(
         filepath=output_path,
-        genesis=genesis,
-        hair_obj=hair_obj,
-        hair_data=hair_data,
-        author_name=author_name,
-        hair_id=hair_id
+        hair_data=hair_data
     )
     print(
         "[VAB]",

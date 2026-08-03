@@ -2,20 +2,18 @@ import bpy
 import traceback
 from dataclasses import dataclass, field
 from enum import Enum, auto
-
-from ..hairlibs.hair_converter import convert_to_dazhair, find_hair_root, find_nearest_scalp_vertex
-
+from ..hairlibs.hair_converter import convert_particle_hair_to_dazhair, convert_to_dazhair, find_hair_root
 from ..hairlibs.daz_hair_data import DAZHairData
-
 ##################################################
 # State Machine
 ##################################################
 class HairState(Enum):
     INIT = auto()
-    FIND_ROOT = auto()
+    BUILD_ROOT = auto()
     FIND_SCALP = auto()
     BUILD_STRANDS = auto()
     BUILD_SCALP_MASK = auto()
+    BUILD_VERTEX_BUFFER = auto()
     BUILD_INDICES = auto()
     BUILD_DISTANCE_JOINTS = auto()
     BUILD_POINT_JOINTS = auto()
@@ -31,12 +29,13 @@ class HairBuildTask:
     ##################################################
     # Input
     ##################################################
-    genesis_obj:bpy.types.Object
+    scalp_obj:bpy.types.Object
     hair_obj:bpy.types.Object
+    eval_psys: bpy.types.ParticleSystem | None
     ##################################################
     # Options
     ##################################################
-    segments:int = 16
+    segments:int = 5
     ##################################################
     # Runtime
     ##################################################
@@ -75,7 +74,7 @@ class HairBuildTask:
         try:
             if self.state == HairState.INIT:
                 self.init_task()
-            elif self.state == HairState.FIND_ROOT:
+            elif self.state == HairState.BUILD_ROOT:
                 self.build_roots()
             elif self.state == HairState.FIND_SCALP:
                 self.find_scalp()
@@ -83,12 +82,14 @@ class HairBuildTask:
                 self.build_strands()
             elif self.state == HairState.BUILD_SCALP_MASK:
                 self.build_scalp_mask()
+            elif self.state == HairState.BUILD_VERTEX_BUFFER:
+                self.build_vertex_buffer()
             elif self.state == HairState.BUILD_INDICES:
                 self.build_indices()
-            elif self.state == HairState.BUILD_DISTANCE_JOINTS:
-                self.build_distance_joints()
-            elif self.state == HairState.BUILD_POINT_JOINTS:
-                self.build_point_joints()
+            # elif self.state == HairState.BUILD_DISTANCE_JOINTS:
+            #     self.build_distance_joints()
+            # elif self.state == HairState.BUILD_POINT_JOINTS:
+            #     self.build_point_joints()
             elif self.state == HairState.BUILD_RIGIDITY:
                 self.build_rigidity()
         except Exception as e:
@@ -101,7 +102,7 @@ class HairBuildTask:
     # INIT
     ##################################################
     def init_task(self):
-        if self.genesis_obj is None:
+        if self.scalp_obj is None:
             raise Exception(
                 "Genesis missing"
             )
@@ -113,24 +114,19 @@ class HairBuildTask:
             raise Exception(
                 "Hair object must be Curve"
             )
+
         self.progress_value=0.05
         self.state=(
-            HairState.FIND_ROOT
+            HairState.BUILD_ROOT
         )
     ##################################################
     # Step 1
     # Find hair roots
     ##################################################
     def build_roots(self):
-        self.hair_roots=(
-            find_hair_root(
-                self.hair_obj
-            )
-        )
+        self.hair_roots=find_hair_root(self.scalp_obj,self.eval_psys)
         if len(self.hair_roots)==0:
-            raise Exception(
-                "No hair roots found"
-            )
+            raise Exception("No hair roots found")
         print(
             "[Hair]",
             "Root count:",
@@ -146,16 +142,12 @@ class HairBuildTask:
     ##################################################
     def find_scalp(self):
         self.root_mapping=(
-            find_nearest_scalp_vertex(
-                self.hair_roots,
-                self.genesis_obj
+            self.hair_data.build_particle_hair_root_scalp_mapping(
+                self.scalp_obj,
+                self.eval_psys
             )
         )
-        print(
-            "[Hair]",
-            "Root mapping:",
-            len(self.root_mapping)
-        )
+
         self.progress_value=0.3
         self.state=(
             HairState.BUILD_STRANDS
@@ -165,14 +157,11 @@ class HairBuildTask:
     # Create DAZHairData
     ##################################################
     def build_strands(self):
-        self.hair_data=(
-            convert_to_dazhair(
-                self.hair_obj,
-                self.root_mapping,
-                self.segments
+        self.hair_data=convert_particle_hair_to_dazhair(
+                self.eval_psys,
+                self.scalp_obj,
+                self.root_mapping
             )
-        )
-
         self.progress_value=0.45
         self.state=(
             HairState.BUILD_SCALP_MASK
@@ -187,9 +176,15 @@ class HairBuildTask:
                 "Hair data missing"
             )
         self.hair_data.build_scalp_mask(
-            self.genesis_obj
+            self.scalp_obj
         )
         self.progress_value=0.55
+        self.state=(
+            HairState.BUILD_VERTEX_BUFFER
+        )
+    def build_vertex_buffer(self):
+        self.hair_data.build_vertex_buffer()
+        self.progress_value=0.6
         self.state=(
             HairState.BUILD_INDICES
         )
@@ -198,33 +193,13 @@ class HairBuildTask:
     # Render / physics indices
     ##################################################
     def build_indices(self):
-        self.hair_data.build_indices()
+        self.hair_data.build_runtime_indices()
         self.progress_value=0.65
-        self.state=(
-            HairState.BUILD_DISTANCE_JOINTS
-        )
-    ##################################################
-    # Step 6
-    # Distance joints
-    ##################################################
-    def build_distance_joints(self):
-        self.hair_data.build_distance_joints()
-        self.progress_value=0.75
-        self.state=(
-            HairState.BUILD_POINT_JOINTS
-        )
-    ##################################################
-    # Step 7
-    # Point joints
-    ##################################################
-    def build_point_joints(self):
-        self.hair_data.build_point_joints()
-        self.progress_value=0.85
         self.state=(
             HairState.BUILD_RIGIDITY
         )
     ##################################################
-    # Step 8
+    # Step 6
     # Rigidity
     ##################################################
     def build_rigidity(self):
@@ -241,6 +216,7 @@ class HairBuildTask:
             raise RuntimeError(
                 "Hair task not finished"
             )
+        self.hair_data.validate_before_export()
         return self.hair_data
     ##################################################
     # Status
@@ -270,12 +246,35 @@ class HairBuildTask:
 # Factory
 ##################################################
 def create_hair_task(
-        genesis_obj,
+        scalp_obj,
         hair_obj,
-        segments=16
+        segments,
+        hair_type = "particles"
 ):
+    eval_psys= None
+
+    if hair_type == "particles":
+        if not scalp_obj or not scalp_obj.particle_systems:
+            raise RuntimeError("Object has no particle system")
+        psys = scalp_obj.particle_systems.active
+        if psys is None:
+            raise RuntimeError("No active particle system")
+
+        if psys.settings.type != 'HAIR':
+            raise TypeError("Particle system must be HAIR")
+
+        # -------------------------------------------------------------
+        # 关键步骤：获取当前上下文的依赖图（Depsgraph）和求值后的物体
+        # -------------------------------------------------------------
+        depsgraph = bpy.context.evaluated_depsgraph_get()
+        eval_obj = scalp_obj.evaluated_get(depsgraph)
+
+        # 从求值后的物体中获取激活的粒子系统
+        eval_psys = eval_obj.particle_systems.active
+
     return HairBuildTask(
-        genesis_obj=genesis_obj,
+        scalp_obj=scalp_obj,
         hair_obj=hair_obj,
+        eval_psys=eval_psys,
         segments=segments
     )

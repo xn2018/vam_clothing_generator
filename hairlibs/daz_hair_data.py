@@ -1,5 +1,8 @@
-from dataclasses import dataclass, field
+from typing import cast
+import bpy
 from mathutils import Vector
+from mathutils.kdtree import KDTree
+from dataclasses import dataclass, field
 @dataclass
 class DAZHairStrand:
     """
@@ -11,11 +14,8 @@ class DAZHairStrand:
     vertices: list = field(default_factory=list)
     root: Vector | None = None
     vertex_offset:int=0
-    def add_point(self,co):
-        v=Vector(co)
-        if self.root is None:
-            self.root=v
-        self.vertices.append(v)
+    rigidities:list=field(default_factory=list)
+    weights:list=field(default_factory=list)
     @property
     def length(self):
         if len(self.vertices) < 2:
@@ -28,6 +28,9 @@ class DAZHairStrand:
                 self.vertices[i]
             ).length
         return total
+#==============================================
+# DAZHairData
+#==============================================
 @dataclass
 class DAZHairData:
     """
@@ -43,20 +46,28 @@ class DAZHairData:
     # ==========================
     # scalp mask
     # ==========================
-    scalp_provider_name:str="Genesis2Female"
+    scalp_provider_name:str="KrayonScalp"
     scalp_mask_name:str="scalp"
     scalp_mask:list=field(default_factory=list)
-    scalp_indices = []
     strands_mask:list=field(default_factory=list)
     scalp_vertex_count:int=0
+    # scalp_vertices:list=field(default_factory=list)
+    # scalp triangle index buffer
+    scalp_triangle_indices:list[int]=field(
+        default_factory=list
+    )
+    # scalp active vertices
+    scalp_vertices_indices:list[int]=field(
+        default_factory=list
+    )
     runtime_strands:list = field(default_factory=list)
     # ==========================
     # basic geometry
     # ==========================
     name:str = "DAZHair"
-    material_name:str="Main"
+    material_name:str = "Main"
     # points per strand
-    segments:int = 16
+    segments:int = 5
     # distance between points
     segment_length:float = 0.01
     # ==========================
@@ -66,11 +77,12 @@ class DAZHairData:
     # flattened vertices
     vertices:list = field(default_factory=list)
     # scalp vertex -> hair root
-    hair_root_to_scalp_indices:list = field(default_factory=list)
+    hair_root_to_scalp_indices:list[int] = field(default_factory=list)
     # root mapping
     hair_root_positions:list=field(
         default_factory=list
     )
+    hair_vertices_groups:list=field(default_factory=list)
     # point_joints
     point_joints:list = field(
         default_factory=list
@@ -103,71 +115,388 @@ class DAZHairData:
     # ==========================
     root_color=(0.1,0.05,0.02)
     tip_color=(0.3,0.15,0.05)
+    def blender_to_vam(
+        self,
+        v
+    ) -> Vector:
+        """
+        Blender -> VaM(Unity)
+        Blender:
+            X right
+            Y forward
+            Z up
+        VaM:
+            X right
+            Y up
+            Z forward
+        """
+        return Vector((
+            float(-v.x),
+            float(v.z),
+            float(-v.y)
+        ))
     # ==========================
-    # build functions
+    # add_strand
     # ==========================
     def add_strand(
         self,
-        points,
-        scalp_index=-1
+        scalp_index:int,
+        vertices:list,
+        weights:list,
+        allow_replace=False
     ):
-        strand = DAZHairStrand()
-        strand.scalp_index = scalp_index
-        for p in points:
-            strand.add_point(p)
-        self.strands.append(strand)
+        #
+        # validate
+        #
+        if scalp_index < 0:
+            raise ValueError(
+                f"Invalid scalp index {scalp_index}"
+            )
+        if scalp_index >= len(self.strands):
+            raise IndexError(
+                f"Scalp index {scalp_index} out of range"
+            )
+        strand = self.strands[scalp_index]
+        if (strand.vertices and not allow_replace):
+            raise Exception("Strands Exsit:", scalp_index)
+        #
+        # validate particle keys
+        #
+        if len(vertices)!=len(weights):
+            raise ValueError(
+                "vertices count != weights count"
+            )
+        #
+        # coordinates
+        #
+        strand.vertices=[
+            self.blender_to_vam(v)
+            for v in vertices
+        ]
+        #
+        # particle hair rigidity
+        #
+        strand.weights=[
+            max(
+                0.0,
+                min(
+                    1.0,
+                    float(w)
+                )
+            )
+            for w in weights
+        ]
+        if scalp_index not in (
+            self.hair_root_to_scalp_indices
+        ):
+            self.hair_root_to_scalp_indices.append(
+                scalp_index
+            )
+        return strand
+    # ==========================
+    # set_scalp_vertex_count
+    # ==========================
+    def set_scalp_vertex_count(self,count):
+        self.scalp_vertex_count = count
+    # ==========================
+    # init_scalp_strands
+    # ==========================
+    def init_strands(self):
+        self.strands.clear()
+        for i in range(self.scalp_vertex_count):
+            self.strands.append(
+                DAZHairStrand(
+                    scalp_index=i,
+                    vertices=[]
+                )
+            )
+        return self.strands
+    # ==========================================================
+    # find nearest scalp
+    # ==========================================================
+    def build_hair_root_scalp_mapping(
+            self,
+            hair_obj,
+            scalp_obj,
+            scalp_group="scalp",
+            max_distance=0.1
+    ):
+        """
+        Build RuntimeHairGeometryCreator.hairRootToScalpIndices
+        hair_obj:
+            Blender curve hair
+        scalp_obj:
+            VaM scalp provider mesh
+        return:
+            [
+                scalp vertex index,
+                ...
+            ]
+        Example:
+            [408,409,410,411]
+        """
+        if scalp_obj.type != "MESH":
+            raise TypeError(
+                "Scalp object must be mesh"
+            )
+        mesh = scalp_obj.data
+        ##################################################
+        # collect scalp vertices
+        ##################################################
+        scalp_vertices=[]
+        vg=None
+        if scalp_group:
+            vg=scalp_obj.vertex_groups.get(
+                scalp_group
+            )
+        for v in mesh.vertices:
+            if vg:
+                enabled=False
+                for g in v.groups:
+                    if g.group == vg.index:
+                        enabled=True
+                        break
+                if not enabled:
+                    continue
+            world_pos = (
+                scalp_obj.matrix_world @ v.co
+            )
+            scalp_vertices.append(
+                (
+                    v.index,
+                    world_pos
+                )
+            )
+        if len(scalp_vertices)==0:
+            raise RuntimeError(
+                "No scalp vertices found"
+            )
+        ##################################################
+        # KDTree
+        ##################################################
+        kd=KDTree(
+            len(scalp_vertices)
+        )
+        for i,(vid,co) in enumerate(
+            scalp_vertices
+        ):
+            kd.insert(
+                co,
+                vid
+            )
+        kd.balance()
+        ##################################################
+        # find hair roots
+        ##################################################
+        result=[]
+        curve=hair_obj.data
+        for spline in curve.splines:
+            if spline.type=="BEZIER":
+                if len(spline.bezier_points)==0:
+                    continue
+                root=spline.bezier_points[0].co
+            else:
+                if len(spline.points)==0:
+                    continue
+                p=spline.points[0]
+                root=Vector(
+                    (
+                        p.co.x,
+                        p.co.y,
+                        p.co.z
+                    )
+                )
+            root_world = (
+                hair_obj.matrix_world @ root
+            )
+            ##################################################
+            # nearest scalp vertex
+            ##################################################
+            co,index,distance = kd.find(root_world)
+            distance = cast(float,distance)
+            if distance > max_distance:
+                print(
+                    "Hair root too far:",
+                    distance
+                )
+                continue
+            result.append(
+                index
+            )
+        ##################################################
+        # remove duplicate
+        ##################################################
+        result=list(
+            dict.fromkeys(
+                result
+            )
+        )
+        self.hair_root_to_scalp_indices=result
+        return result
+    def build_particle_hair_root_scalp_mapping(
+        self,
+        scalp_obj,
+        hair_psys,
+        scalp_group="scalp"
+    ):
+        if scalp_obj.type != "MESH":
+            raise TypeError(
+                "Scalp object must be mesh"
+            )
+        if hair_psys is None:
+            raise RuntimeError(
+                "Particle system missing"
+            )
+        mesh=scalp_obj.data
+        #
+        # collect scalp vertex indices
+        #
+        scalp_indices=[]
+        vg=None
+        if scalp_group:
+            vg=scalp_obj.vertex_groups.get(
+                scalp_group
+            )
+        for v in mesh.vertices:
+            if vg:
+                enabled=False
+                for g in v.groups:
+                    if g.group==vg.index:
+                        enabled=True
+                        break
+                if not enabled:
+                    continue
+            scalp_indices.append(
+                v.index
+            )
+        print(
+            "Scalp vertices:",
+            len(scalp_indices)
+        )
+        #
+        # particle count
+        #
+        particle_count=len(
+            hair_psys.particles
+        )
+        print(
+            "Particle count:",
+            particle_count
+        )
+        if particle_count != len(scalp_indices):
+            raise RuntimeError(
+                f"Particle count {particle_count} "
+                f"!= scalp vertices {len(scalp_indices)}"
+            )
+        #
+        # direct mapping
+        #
+        result=[]
+        for i in range(
+            particle_count
+        ):
+            result.append(
+                scalp_indices[i]
+            )
+        print(
+            "[Hair] Root mapping:",
+            result[:20]
+        )
+        self.hair_root_to_scalp_indices=result
+        return result
     ######################################
     # build_scalp_mask
     ######################################
     def build_scalp_mask(
             self,
-            genesis_obj,
+            scalp_obj,
             group_name="scalp"
     ):
         """
-        Build RuntimeHairGeometryCreator.ScalpMask
+        Build RuntimeHairGeometryCreator scalpMask
         Blender:
-            Vertex Group "scalp"
+            vertex group "scalp"
         VaM:
-            bool[] scalpMask.vertices
+            strandsMask
+        Args:
+            scalp_obj:
+                Scalp Provider mesh
         """
-        if genesis_obj.type != "MESH":
+        if scalp_obj.type != "MESH":
             raise TypeError(
-                "Genesis object must be mesh"
+                "Scalp provider must be mesh"
             )
-        mesh = genesis_obj.data
-        vg = genesis_obj.vertex_groups.get(
+        mesh = scalp_obj.data
+        self.scalp_triangle_indices.clear()
+        self.scalp_vertices_indices.clear()
+        for poly in mesh.polygons:
+            # 只取材质0
+            if poly.material_index!=0:
+                continue
+            self.scalp_triangle_indices.extend(
+                [
+                    poly.vertices[2],
+                    poly.vertices[1],
+                    poly.vertices[0]
+                ]
+            )
+        #
+        # provider name
+        #
+        self.scalp_provider_name = (
+            scalp_obj.name
+        )
+        #
+        # remove Blender duplicate suffix
+        #
+        if "." in self.scalp_provider_name:
+            base, suffix = (
+                self.scalp_provider_name.rsplit(
+                    ".",
+                    1
+                )
+            )
+            if suffix.isdigit():
+                self.scalp_provider_name = base
+        #
+        # find scalp group
+        #
+        vg = scalp_obj.vertex_groups.get(
             group_name
         )
         if vg is None:
             raise Exception(
-                f"Missing vertex group: {group_name}"
+                f"Missing vertex group {group_name}"
             )
-        #
-        # provider
-        #
-        self.scalp_provider_name = (
-            genesis_obj.name
-        )
-        self.scalp_mask_name = (
-            group_name
+        vertex_count = len(
+            mesh.vertices
         )
         #
-        # create bool array
+        # default disabled
         #
         self.scalp_mask = [
-            False
-        ] * len(mesh.vertices)
+            True
+        ] * vertex_count
         #
-        # fill mask
+        # active scalp vertices
         #
         for v in mesh.vertices:
             for g in v.groups:
                 if g.group == vg.index:
-                    self.scalp_mask[
+                    self.scalp_mask[v.index] = False
+                    self.scalp_vertices_indices.append(
                         v.index
-                    ] = True
+                    )
                     break
+        #
+        # statistics
+        #
+        self.scalp_vertex_count = (
+            vertex_count
+        )
+        self.scalp_enabled_count = (
+            len(self.scalp_vertices_indices)
+        )
         return self.scalp_mask
     # ==========================
     # build_vertex_buffer
@@ -184,297 +513,84 @@ class DAZHairData:
                 strand.vertices
             )
     # ==========================
-    # build_out_particles
+    # build_flat_vertices
     # ==========================
-    def build_out_particles(self):
-        self.out_particles.clear()
-        self.out_particles.extend(
-            self.tess_render_particles
-        )
-    # ==========================
-    # build_tess_render_particles
-    # ==========================
-    def build_tess_render_particles(
-        self,
-        tess_segments=4):
-        """
-        Subdivide render particles.
-        Input:
-            L0 R0
-            L1 R1
-        Output:
-            L0 R0
-            Lx Rx
-            Lx Rx
-            L1 R1
-        """
-        self.tess_render_particles.clear()
-        rp=self.render_particles
-        for i in range(
-            0,
-            len(rp)-2,
-            2
-        ):
-            left0=rp[i]
-            right0=rp[i+1]
-            left1=rp[i+2]
-            right1=rp[i+3]
-            for j in range(
-                tess_segments
-            ):
-                t=j/tess_segments
-                left=(
-                    left0*(1-t)
-                    +
-                    left1*t
-                )
-                right=(
-                    right0*(1-t)
-                    +
-                    right1*t
-                )
-                self.tess_render_particles.append(
-                    left
-                )
-                self.tess_render_particles.append(
-                    right
-                )
-        #
-        # append final point
-        #
-        self.tess_render_particles.append(
-            rp[-2]
-        )
-        self.tess_render_particles.append(
-            rp[-1]
-        )
-    # ==========================
-    # build_render_particles
-    # ==========================
-    def build_render_particles(
-        self,
-        width=0.001):
-        """
-        Convert physics particles
-        into render particles.
-        One particle becomes:
-            left
-            right
-        """
-        self.render_particles.clear()
+    def build_flat_vertices(self):
+        self.vertices.clear()
+        self.hair_root_to_scalp_indices.clear()
+        runtime_index=0
         for strand in self.strands:
-            count=len(
+            if not strand.vertices:
+                continue
+            strand.vertex_offset=runtime_index
+            self.hair_root_to_scalp_indices.append(
+                strand.scalp_index
+            )
+            self.vertices.extend(
                 strand.vertices
             )
-            if count < 2:
-                continue
-            for i,p in enumerate(
+            runtime_index += len(
                 strand.vertices
-            ):
-                #
-                # calculate tangent
-                #
-                if i==0:
-                    tangent=(
-                        strand.vertices[1]
-                        -
-                        p
-                    ).normalized()
-                elif i==count-1:
-                    tangent=(
-                        p
-                        -
-                        strand.vertices[i-1]
-                    ).normalized()
-                else:
-                    tangent=(
-                        strand.vertices[i+1]
-                        -
-                        strand.vertices[i-1]
-                    ).normalized()
-                #
-                # calculate hair width direction
-                #
-                side=tangent.cross(
-                    Vector((0,1,0))
-                )
-                if side.length < 0.00001:
-                    side=tangent.cross(
-                        Vector((1,0,0))
-                    )
-                side.normalize()
-                #
-                # width falloff
-                #
-                t=i/(count-1)
-                # root thicker
-                w=width*(1.0-t*0.8)
-                left=p-side*w
-                right=p+side*w
-                self.render_particles.append(
-                    left
-                )
-                self.render_particles.append(
-                    right
-                )
+            )
+        return self.vertices
     # ==========================
-    # build_indices
+    # build_runtime_indices
     # ==========================
-    def build_indices(
-        self,
-        width=0.001
-    ):
-        """
-        Build hair render index buffer.
-        Convert:
-            particle strand
-            p0
-            p1
-            p2
-        into:
-            ribbon mesh
-        render_vertices:
-            L0 R0
-            L1 R1
-            L2 R2
-        indices:
-            triangle list
-        """
-        self.render_vertices.clear()
+    def build_runtime_indices(self):
         self.indices.clear()
-        for strand in self.strands:
-            if len(strand.vertices)<2:
-                continue
-            start=len(
-                self.render_vertices
+        #
+        # build active vertex remap
+        #
+        active_vertices = (
+            self.scalp_vertices_indices
+        )
+        #
+        # original scalp vertex index
+        # ->
+        # runtime local index
+        #
+        remap = {}
+        for i, vid in enumerate(active_vertices):
+            remap[vid] = i
+        #
+        # build triangles
+        #
+        tris = self.scalp_triangle_indices
+        if len(tris) % 3 != 0:
+            raise Exception(
+                "scalp triangle index count invalid"
             )
+        for i in range(0,len(tris),3):
+            a = tris[i]
+            b = tris[i+1]
+            c = tris[i+2]
             #
-            # create ribbon vertices
+            # only keep triangle
+            # whose three vertices are enabled
             #
-            for i,p in enumerate(
-                strand.vertices
-            ):
-                if i==0:
-                    tangent=(
-                        strand.vertices[1]
-                        -
-                        p
-                    ).normalized()
-                elif i==len(strand.vertices)-1:
-                    tangent=(
-                        p
-                        -
-                        strand.vertices[i-1]
-                    ).normalized()
-                else:
-                    tangent=(
-                        strand.vertices[i+1]
-                        -
-                        strand.vertices[i-1]
-                    ).normalized()
-                #
-                # generate side vector
-                #
-                side=tangent.cross(
-                    Vector((0,1,0))
-                )
-                if side.length < 0.0001:
-                    side=tangent.cross(
-                        Vector((1,0,0))
-                    )
-                side.normalize()
-                left=p-side*width
-                right=p+side*width
-                self.render_vertices.append(
-                    left
-                )
-                self.render_vertices.append(
-                    right
-                )
-            #
-            # build triangles
-            #
-            point_count=len(
-                strand.vertices
-            )
-            for i in range(
-                point_count-1
-            ):
-                a=start+i*2
-                b=a+1
-                c=a+2
-                d=a+3
-                #
-                # triangle 1
-                #
-                self.indices.extend(
-                    [
-                        a,
-                        b,
-                        c
-                    ]
-                )
-                #
-                # triangle 2
-                #
-                self.indices.extend(
-                    [
-                        a,
-                        c,
-                        d
-                    ]
-                )
-    # ==========================
-    # build_point_joints
-    # ==========================
-    def build_point_joints(self):
-        self.point_joints=[]
-        for strand_index,strand in enumerate(self.strands):
-            if strand_index >= len(
-                self.hair_root_to_scalp_indices
+            if (
+                a not in remap or
+                b not in remap or
+                c not in remap
             ):
                 continue
-            scalp_index = (
-                self.hair_root_to_scalp_indices[
-                    strand_index
+            #
+            # convert to runtime local index
+            #
+            self.indices.extend(
+                [
+                    remap[a],
+                    remap[b],
+                    remap[c]
                 ]
             )
-            if scalp_index <0:
-                continue
-            joint={
-                "particle":
-                    strand.vertex_offset,
-                "scalp_vertex":
-                    scalp_index,
-                "rigidity":
-                    self.rigidities[strand.vertex_offset] # 这里数组越界了
-            }
-            self.point_joints.append(
-                joint
-            )
-    # ==========================
-    # build_distance_joints
-    # ==========================
-    def build_distance_joints(self):
-        self.distance_joints=[]
-        for strand in self.strands:
-            offset=strand.vertex_offset
-            count=len(strand.vertices)
-            for i in range(count-1):
-                a=offset+i
-                b=offset+i+1
-                length=(
-                    self.vertices[a]
-                    -
-                    self.vertices[b]
-                ).length
-                self.distance_joints.append(
-                    {
-                        "a":a,
-                        "b":b,
-                        "distance":length
-                    }
-                )
+        print(
+            "Runtime indices:",
+            len(self.indices)
+        )
+        print(
+            self.indices
+        )
     # ==========================
     # build_runtime_strands
     # ==========================
@@ -482,120 +598,257 @@ class DAZHairData:
         self,
         scalp_vertex_count
     ):
+        """
+        Build RuntimeHairGeometryCreator.strands
+        from Blender Particle Hair
+        keep:
+            strands[index]
+            =
+            scalp vertex index
+        """
         self.runtime_strands=[]
-        #
-        # create empty scalp strands
-        #
+        ##################################################
+        # 1. create empty scalp strands
+        ##################################################
         for i in range(
             scalp_vertex_count
         ):
-            strand = DAZHairStrand()
+            strand=DAZHairStrand()
             strand.scalp_index=i
             strand.vertices=[]
+            strand.vertex_offset=0
             self.runtime_strands.append(
                 strand
             )
-        #
-        # attach curve hair
-        #
+        ##################################################
+        # 2. attach particle hair
+        ##################################################
         for source in self.strands:
-            scalp_index = (
+            scalp_index=(
                 source.scalp_index
             )
             if scalp_index < 0:
                 continue
             if scalp_index >= scalp_vertex_count:
                 continue
-            target = (
+            target=(
                 self.runtime_strands[
                     scalp_index
                 ]
             )
             #
-            # copy
+            # copy particle strand points
             #
-            target.vertices=[]
-            for v in source.vertices:
-                target.vertices.append(
-                    Vector(v)
-                )
+            target.vertices=[
+                Vector(v)
+                for v in source.vertices
+            ]
             #
-            # keep original data
+            # keep offset
             #
-            target.vertex_offset = (
+            target.vertex_offset=(
                 source.vertex_offset
             )
         return self.runtime_strands
     # ==========================
     # build_rigidities
     # ==========================
-    def build_rigidities(
-        self,
-        root_rigidity=0.55,
-        main_rigidity=0.55,
-        tip_rigidity=0.0,
-        rolloff_power=5.0
-    ):
+    def build_rigidities(self):
         self.rigidities.clear()
+        vertex_count=0
         for strand in self.strands:
-            count = len(
-                strand.vertices
-            )
-            if count == 0:
+            if not strand.vertices:
                 continue
-            for i in range(count):
-                if i == 0:
-                    rigidity = 1.0
-                elif i == 1:
-                    rigidity = root_rigidity
-                else:
-                    x = (
-                        float(i-1)
-                        /
-                        float(count-2)
-                    )
-                    t = (
-                        1.0-x
-                    ) ** rolloff_power
-                    rigidity = (
-                        tip_rigidity
-                        +
-                        (
-                            main_rigidity
-                            -
-                            tip_rigidity
-                        )
-                        *
-                        t
-                    )
+            if len(strand.weights)!=len(strand.vertices):
+                raise RuntimeError(
+                    f"Rigidity mismatch: "
+                    f"vertices={len(strand.vertices)} "
+                    f"weights={len(strand.weights)}"
+                )
+            for w in strand.weights:
                 self.rigidities.append(
                     max(
                         0.0,
                         min(
                             1.0,
-                            rigidity
+                            float(w)
                         )
                     )
                 )
+            vertex_count+=len(strand.vertices)
+        print(
+            "Vertices:",
+            vertex_count
+        )
+        print(
+            "Rigidities:",
+            len(self.rigidities)
+        )
     # ==========================
     # validate
     # ==========================  
-    def validate(self):
-        errors=[]
-        if len(self.strands)==0:
-            errors.append(
-                "No strands"
+    def validate_before_export(
+        self
+    ):
+        print("="*70)
+        print("DAZHairData Validation")
+        print("="*70)
+        ####################################
+        # Basic
+        ####################################
+        print(
+            "Scalp Provider:",
+            self.scalp_provider_name
+        )
+        print(
+            "Segments:",
+            self.segments
+        )
+        print(
+            "Segment Length:",
+            self.segment_length
+        )
+        ####################################
+        # Scalp mask
+        ####################################
+        print(
+            "Scalp Mask:",
+            len(self.scalp_mask)
+            if self.scalp_mask
+            else 0
+        )
+        if self.scalp_mask:
+            enabled=sum(
+                1
+                for x in self.scalp_mask
+                if x
             )
-        if len(self.hair_root_to_scalp_indices):
-            if len(self.hair_root_to_scalp_indices)!=len(self.strands):
-                errors.append("hair_root_to_scalp_indices count mismatch")
-        for s in self.strands:
-            if len(s.vertices)!=self.segments:
-                errors.append(
-                    f"strand point count {len(s.vertices)} "
-                    f"!= {self.segments}"
+            print(
+                "Scalp Enabled:",
+                enabled
+            )
+        ####################################
+        # Strand
+        ####################################
+        strand_count=len(
+            self.strands
+        )
+        print(
+            "Strand Count:",
+            strand_count
+        )
+        active_strands=0
+        vertex_total=0
+        for i,s in enumerate(
+            self.strands
+        ):
+            if (
+                s.vertices
+                and
+                len(s.vertices)>0
+            ):
+                active_strands+=1
+                vertex_total+=len(
+                    s.vertices
                 )
-        return errors
+        print(
+            "Active Strands:",
+            active_strands
+        )
+        print(
+            "Total Strand Vertices:",
+            vertex_total
+        )
+        ####################################
+        # Flat vertices
+        ####################################
+        print(
+            "Flat vertices:",
+            len(self.vertices)
+        )
+        ####################################
+        # Indices
+        ####################################
+        print("Indices:",len(self.indices))
+        if len(self.indices)%3!=0:
+            print(
+                "ERROR: index count not triangle aligned"
+            )
+        ####################################
+        # Rigidity
+        ####################################
+        if hasattr(
+            self,
+            "rigidities"
+        ):
+            print(
+                "Rigidities:",
+                len(self.rigidities)
+            )
+            if len(self.rigidities)!=len(self.vertices):
+                print(
+                    "WARNING:"
+                    " rigidity count != vertex count"
+                )
+        ####################################
+        # Root Mapping
+        ####################################
+        print(
+            "HairRootToScalpIndices:",
+            len(
+                self.hair_root_to_scalp_indices
+            )
+        )
+        bad=[]
+        for x in self.hair_root_to_scalp_indices:
+            if (
+                x<0
+                or
+                x>=strand_count
+            ):
+                bad.append(x)
+        if bad:
+            print(
+                "ERROR invalid scalp index:",
+                bad[:20]
+            )
+        else:
+            print(
+                "Root mapping OK"
+            )
+        ####################################
+        # Strand consistency
+        ####################################
+        mismatch=0
+        for i,s in enumerate(
+            self.strands
+        ):
+            if s.scalp_index != i:
+                mismatch+=1
+        print(
+            "Strand scalp mismatch:",
+            mismatch
+        )
+        ####################################
+        # Sample
+        ####################################
+        print("\nFirst active strands")
+        count=0
+        for i,s in enumerate(
+            self.strands
+        ):
+            if s.vertices:
+                print(
+                    i,
+                    "scalp=",
+                    s.scalp_index,
+                    "vertices=",
+                    len(s.vertices)
+                )
+                count+=1
+                if count>=10:
+                    break
+        print("="*70)
     # ==========================
     # statistics
     # ==========================  
@@ -621,11 +874,7 @@ class DAZHairData:
             for i in range(
                 len(strand.vertices)-1
             ):
-                d=(
-                    strand.vertices[i+1]
-                    -
-                    strand.vertices[i]
-                ).length
+                d=(strand.vertices[i+1]-strand.vertices[i]).length
                 length.append(d)
         if length:
             self.segment_length=sum(length)/len(length)

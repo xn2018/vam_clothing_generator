@@ -1,16 +1,6 @@
 import struct
-# =========================================================
-# VaM string
-# =========================================================
-def write_string(f, text):
-    data = text.encode("utf-8")
-    f.write(
-        struct.pack(
-            "B",
-            len(data)
-        )
-    )
-    f.write(data)
+
+from ..writers.binary_writer import write_string
 # =========================================================
 # Vector3
 # =========================================================

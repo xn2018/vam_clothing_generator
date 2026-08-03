@@ -34,6 +34,7 @@ class VAMGEN_PT_MainPanel(bpy.types.Panel):
         # VAM
         # --------------------------------------------------
         box = layout.box()
+
         box.label(
             text="VAM Package",
             icon="FILE_TEXT"
@@ -50,6 +51,12 @@ class VAMGEN_PT_MainPanel(bpy.types.Panel):
             props,
             "package_type"
         )
+
+        if props.package_type == "HairFemale": # type: ignore
+            box.prop(
+                props,
+                "hair_type"
+            )
         # --------------------------------------------------
         # VAJ
         # --------------------------------------------------
@@ -134,4 +141,15 @@ class VAMGEN_PT_MainPanel(bpy.types.Panel):
             "vam.ot_selecttri",
             icon="SNAP_FACE",
             text="Select Traingles by ID"
+        )
+        split_set_root_dev = box_gen.split(factor=0, align=True)
+        col1 = split_set_root_dev.column()
+        col1.label(
+            text="Set Spline Root"
+        )
+        col2 = split_set_root_dev.column()
+        col2.operator(
+            "vam.ot_setsplineroot",
+            icon="MOD_PARTICLE_INSTANCE",
+            text="Set Spline Root"
         )

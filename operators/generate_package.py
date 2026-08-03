@@ -80,8 +80,8 @@ class VAM_OT_GeneratePackage(
         # Hair Packing pipeline
         ##################################################
         if package_type == "HairFemale":
-            hair_result = runtime.hair_result
-            if hair_result is None:
+            hair_data = runtime.hair_result
+            if hair_data is None:
                 self.report({'ERROR'},"hair result missing")
                 #
                 # 防止状态错误
@@ -97,15 +97,12 @@ class VAM_OT_GeneratePackage(
                 {'INFO'},
                 "Generating Hair VAB..."
             )
-
-            print("[Hair] strands:", len(hair_result.strands))
-            print("[Hair] hair_root_to_scalp_indices:", len(hair_result.hair_root_to_scalp_indices))
-            print("[Hair] vertices", len(hair_result.vertices))
+            
             generate_hair_vab(
                 genesis,
                 clothing_hair_obj,
                 clothing_hair_id,
-                hair_result,
+                hair_data,
                 author_name,
                 output_dir,
             )
@@ -117,7 +114,7 @@ class VAM_OT_GeneratePackage(
                 "Generating VAJ..."
             )
             generate_hair_vaj(
-                hair_result,
+                hair_data,
                 props,
                 output_dir
             )
@@ -346,3 +343,213 @@ class VAM_OT_SELECTTRIANGLES(bpy.types.Operator):
         bmesh.update_edit_mesh(me)
         self.report({'INFO'}, f"Successfully selected face Index: {triangles_id}")
         return {'FINISHED'}
+
+class VAM_OT_SETSPLINEROOT(bpy.types.Operator):
+    """将曲线编辑模式中选中的顶点设为当前 Spline 的起点"""
+    bl_idname = "vam.ot_setsplineroot"
+    bl_label = "Set Selected Point as Root"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    @classmethod
+    def poll(cls, context):
+        return (context.active_object is not None and 
+                context.active_object.type == 'CURVE' and 
+                context.mode == 'EDIT_CURVE')
+
+    def execute(self, context: bpy.types.Context)-> set[OperatorReturn]:
+        selected_objs = context.selected_objects
+        if not selected_objs or len(selected_objs) != 1:
+            self.report({'WARNING'}, "请确保仅选中了一个曲线对象！")
+            return {'CANCELLED'}
+
+        curve_obj = selected_objs[0]
+        if curve_obj.type != 'CURVE' or not isinstance(curve_obj.data, bpy.types.Curve):
+            self.report({'WARNING'}, "选中的对象不是曲线 (Curve)！")
+            return {'CANCELLED'}
+
+        curve_data = curve_obj.data
+        
+        # 必须先切回 OBJECT 模式刷新数据流，处理完毕后再切回 EDIT 模式
+        bpy.ops.object.mode_set(mode='OBJECT')
+
+        modified_count = 0
+
+        for spline in curve_data.splines:
+            target_index = -1
+
+            # 1. 查找当前 Spline 中选中的顶点索引
+            if spline.type == 'BEZIER':
+                for i, pt in enumerate(spline.bezier_points):
+                    if pt.select_control_point:
+                        target_index = i
+                        break
+            else:  # POLY 或 NURBS
+                for i, pt in enumerate(spline.points):
+                    if pt.select:
+                        target_index = i
+                        break
+
+            # 未选中点，或者选中的点已经是起点(Index 0)
+            if target_index <= 0:
+                continue
+
+            # 2. 根据曲线是否闭合（use_cyclic_u）以及 Spline 类型进行处理
+            if spline.use_cyclic_u:
+                # 闭合曲线：按选中点作为 Index 0 进行循环移位
+                if spline.type == 'BEZIER':
+                    self.shift_bezier_spline(spline, target_index)
+                else:
+                    self.shift_poly_spline(spline, target_index)
+            else:
+                # 非闭合曲线：翻转整条曲线的方向（首尾颠倒）
+                if spline.type == 'BEZIER':
+                    self.reverse_bezier_spline(spline)
+                else:
+                    self.reverse_poly_spline(spline)
+
+            modified_count += 1
+
+        # 重新回到编辑模式
+        bpy.ops.object.mode_set(mode='EDIT')
+
+        if modified_count > 0:
+            self.report({'INFO'}, f"成功重置 {modified_count} 条样条线的起点！")
+        else:
+            self.report({'WARNING'}, "未找到需要更新起点的选中顶点（或选中的顶点已经是起点）")
+
+        return {'FINISHED'}
+
+    def reverse_bezier_spline(self, spline):
+        """非闭合 Bézier 曲线：整条线序列翻转，且交换左右手柄"""
+        pts = list(spline.bezier_points)
+        
+        # 提取点属性数据
+        data = []
+        for p in pts:
+            data.append({
+                'co': p.co.copy(),
+                # 关键：反转曲线方向时，原来的左手柄变成右手柄，右手柄变成左手柄
+                'handle_left': p.handle_right.copy(),
+                'handle_right': p.handle_left.copy(),
+                'handle_left_type': p.handle_right_type,
+                'handle_right_type': p.handle_left_type,
+                'hide': p.hide,
+                'radius': p.radius,
+                'select_control_point': p.select_control_point,
+                'select_left_handle': p.select_right_handle,
+                'select_right_handle': p.select_left_handle,
+                'tilt': -p.tilt,  # 倾斜角反转
+                'weight_softbody': p.weight_softbody
+            })
+
+        # 序列反转
+        data.reverse()
+
+        # 写回数据
+        for i, p in enumerate(pts):
+            d = data[i]
+            p.co = d['co']
+            p.handle_left = d['handle_left']
+            p.handle_right = d['handle_right']
+            p.handle_left_type = d['handle_left_type']
+            p.handle_right_type = d['handle_right_type']
+            p.hide = d['hide']
+            p.radius = d['radius']
+            p.select_control_point = d['select_control_point']
+            p.select_left_handle = d['select_left_handle']
+            p.select_right_handle = d['select_right_handle']
+            p.tilt = d['tilt']
+            p.weight_softbody = d['weight_softbody']
+
+    def reverse_poly_spline(self, spline):
+        """非闭合 Poly / NURBS 曲线：整条线序列翻转"""
+        pts = list(spline.points)
+        
+        data = []
+        for p in pts:
+            data.append({
+                'co': p.co.copy(),
+                'hide': p.hide,
+                'radius': p.radius,
+                'select': p.select,
+                'tilt': -p.tilt,
+                'weight': p.weight,
+                'weight_softbody': p.weight_softbody
+            })
+
+        # 序列反转
+        data.reverse()
+
+        for i, p in enumerate(pts):
+            d = data[i]
+            p.co = d['co']
+            p.hide = d['hide']
+            p.radius = d['radius']
+            p.select = d['select']
+            p.tilt = d['tilt']
+            p.weight = d['weight']
+            p.weight_softbody = d['weight_softbody']
+
+    def shift_bezier_spline(self, spline, root_idx):
+        """闭合 Bézier 曲线：按索引循环移位"""
+        pts = list(spline.bezier_points)
+        data = []
+        for p in pts:
+            data.append({
+                'co': p.co.copy(),
+                'handle_left': p.handle_left.copy(),
+                'handle_right': p.handle_right.copy(),
+                'handle_left_type': p.handle_left_type,
+                'handle_right_type': p.handle_right_type,
+                'hide': p.hide,
+                'radius': p.radius,
+                'select_control_point': p.select_control_point,
+                'select_left_handle': p.select_left_handle,
+                'select_right_handle': p.select_right_handle,
+                'tilt': p.tilt,
+                'weight_softbody': p.weight_softbody
+            })
+
+        new_data = data[root_idx:] + data[:root_idx]
+
+        for i, p in enumerate(pts):
+            d = new_data[i]
+            p.co = d['co']
+            p.handle_left = d['handle_left']
+            p.handle_right = d['handle_right']
+            p.handle_left_type = d['handle_left_type']
+            p.handle_right_type = d['handle_right_type']
+            p.hide = d['hide']
+            p.radius = d['radius']
+            p.select_control_point = d['select_control_point']
+            p.select_left_handle = d['select_left_handle']
+            p.select_right_handle = d['select_right_handle']
+            p.tilt = d['tilt']
+            p.weight_softbody = d['weight_softbody']
+
+    def shift_poly_spline(self, spline, root_idx):
+        """闭合 Poly / NURBS 曲线：按索引循环移位"""
+        pts = list(spline.points)
+        data = []
+        for p in pts:
+            data.append({
+                'co': p.co.copy(),
+                'hide': p.hide,
+                'radius': p.radius,
+                'select': p.select,
+                'tilt': p.tilt,
+                'weight': p.weight,
+                'weight_softbody': p.weight_softbody
+            })
+
+        new_data = data[root_idx:] + data[:root_idx]
+
+        for i, p in enumerate(pts):
+            d = new_data[i]
+            p.co = d['co']
+            p.hide = d['hide']
+            p.radius = d['radius']
+            p.select = d['select']
+            p.tilt = d['tilt']
+            p.weight = d['weight']
+            p.weight_softbody = d['weight_softbody']
