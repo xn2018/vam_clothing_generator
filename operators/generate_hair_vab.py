@@ -1,5 +1,5 @@
 import os
-from .hair_vab_writer import vab_hair_file_writer
+from ..hairlibs.hair_vab_writer import vab_hair_file_writer
 def generate_hair_vab(
         genesis,
         hair_obj,

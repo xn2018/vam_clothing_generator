@@ -2,13 +2,13 @@ from dataclasses import dataclass
 from typing import cast
 import bpy
 from mathutils import Vector
-from .daz_hair_data import DAZHairData
+from .daz_hair_data import DAZHairData, DAZHairStrand
 from .particle_hair_importer import ParticleHairImporter
 @dataclass
 class DAZHairRoot:
-    particle_index:int
+    index:int
     position:Vector
-    particle:bpy.types.Particle
+    source:object
 #=============================
 # 1.find_hair_root
 #=============================
@@ -54,9 +54,100 @@ def find_hair_root(
         root_world = (scalp_obj.matrix_world@root_local)
         roots.append(
             DAZHairRoot(
-                particle_index=index,
+                index=index,
                 position=root_world,
-                particle=particle
+                source=particle
+            )
+        )
+    return roots
+def find_curve_hair_root(
+        hair_obj:bpy.types.Object
+)->list[DAZHairRoot]:
+    """
+    Find hair roots from Blender Curve Hair.
+    Curve:
+        spline
+            |
+            +-- first control point
+                    |
+                    + root position
+    Support:
+        BEZIER
+        POLY
+        NURBS
+    return:
+        [
+            {
+                spline_index:int,
+                position:Vector,
+                spline:Spline
+            }
+        ]
+    """
+    if hair_obj.type != "CURVE":
+        raise TypeError(
+            "hair_obj must be Curve"
+        )
+    roots=[]
+    curve = cast(bpy.types.Curve, hair_obj.data)
+    for index,spline in enumerate(
+        curve.splines
+    ):
+        root_local=None
+        ####################################
+        # BEZIER
+        ####################################
+        if spline.type == "BEZIER":
+            if len(
+                spline.bezier_points
+            ) == 0:
+                continue
+            root_local = (
+                spline.bezier_points[0].co
+            )
+        ####################################
+        # POLY / NURBS
+        ####################################
+        elif (
+            spline.type == "POLY"
+            or
+            spline.type == "NURBS"
+        ):
+            if len(
+                spline.points
+            ) == 0:
+                continue
+            p = spline.points[0]
+            #
+            # Curve point is Vector4
+            # x,y,z,w
+            #
+            root_local = Vector(
+                (
+                    p.co.x,
+                    p.co.y,
+                    p.co.z
+                )
+            )
+        else:
+            print(
+                "Unsupported spline type:",
+                spline.type
+            )
+            continue
+        ####################################
+        # local -> world
+        ####################################
+        root_world = (
+            hair_obj.matrix_world
+            @
+            root_local
+        )
+        roots.append(
+            DAZHairRoot(
+                index=index,
+                position=root_world,
+                source=spline
             )
         )
     return roots
@@ -172,7 +263,8 @@ def sample_polyline(
 # ==========================================================
 # Convert Curve hair
 # ==========================================================
-def convert_to_dazhair(
+def convert_curve_hair_to_dazhair(
+        eval_psys,
         scalp_obj,
         root_mapping
     ):
@@ -186,7 +278,8 @@ def convert_to_dazhair(
         )
         data.init_strands()
         importer=ParticleHairImporter(
-            scalp_obj
+            scalp_obj,
+            eval_psys=eval_psys
         )
         particles=importer.extract()
         #
@@ -335,7 +428,6 @@ def convert_particle_hair_to_dazhair(
     #
     # segments
     #
-    
     data.segments = len(hair_psys.particles[0].hair_keys) - 1
     #
     # scalp vertex count
@@ -469,6 +561,97 @@ def convert_particle_hair_to_dazhair(
     print(
         "[Hair] strands:",
         len(data.hair_root_to_scalp_indices)
+    )
+    print(
+        "[Hair] vertices:",
+        len(data.vertices)
+    )
+    print(
+        "[Hair] rigidities:",
+        len(data.rigidities)
+    )
+    return data
+def convert_strands_to_dazhair(
+        strands:list[DAZHairStrand],
+        scalp_obj:bpy.types.Object,
+        segments:int
+):
+    from .daz_hair_data import DAZHairData
+    data=DAZHairData()
+    #
+    # scalp count
+    #
+    scalp_mesh=cast(
+        bpy.types.Mesh,
+        scalp_obj.data
+    )
+    data.set_scalp_vertex_count(
+        len(
+            scalp_mesh.vertices
+        )
+    )
+    data.segments=segments
+    data.init_strands()
+    used_scalp=set()
+    for strand in strands:
+        scalp_index=(
+            strand.scalp_index
+        )
+        if scalp_index < 0:
+            continue
+        #
+        # 防止重复root
+        #
+        if scalp_index in used_scalp:
+            print(
+                "[Hair] duplicate scalp:",
+                scalp_index
+            )
+            continue
+        used_scalp.add(
+            scalp_index
+        )
+        vertices=strand.vertices
+        weights=strand.weights
+        if len(vertices)!=segments:
+            vertices,weights = (
+                resample_particle_strand(
+                    vertices,
+                    weights,
+                    segments
+                )
+            )
+        #
+        # root必须固定
+        #
+        if weights:
+            weights[0]=1.0
+        data.add_strand(
+            scalp_index=scalp_index,
+            vertices=vertices,
+            weights=weights
+        )
+    #
+    # Runtime segment length
+    #
+    data.calculate_segment_length()
+    #
+    # painted rigidity
+    #
+    data.build_rigidities()
+    #
+    # mapping
+    #
+    data.hair_root_to_scalp_indices=[
+        s.scalp_index
+        for s in data.strands
+        if s.vertices
+    ]
+    print(
+        "[Hair] strands:",
+        len(
+            data.hair_root_to_scalp_indices
+        )
     )
     print(
         "[Hair] vertices:",

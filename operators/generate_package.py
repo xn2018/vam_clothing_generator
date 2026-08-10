@@ -1,20 +1,19 @@
 import bpy
 import bmesh
 import os
-
 from typing import cast
-
-from ..hairlibs.generate_hair_vaj import generate_hair_vaj
-from ..hairlibs.generate_hair_vab import generate_hair_vab
-from ..hairlibs.generate_hair_vam import generate_hair_vam
-
+from .generate_hair_vaj import generate_hair_vaj
+from .generate_hair_vab import generate_hair_vab
+from .generate_hair_vam import generate_hair_vam
 from ..skinwrap.runtime_mesh_cache import get_clothing_daz_mesh
 from ..RuntimeCache.runtime import runtime
 from .operators_types import OperatorReturn
-
 from .generate_vab import generate_vab
 from .generate_vaj import generate_vaj
 from .generate_vam import generate_vam
+from ..hairlibs.curve_resampler import (
+    resample_curve_object
+)
 class VAM_OT_GeneratePackage(
     bpy.types.Operator
 ):
@@ -26,11 +25,11 @@ class VAM_OT_GeneratePackage(
         context
     ):
         """
-        控制按钮是否可点击
-        SkinWrap没有完成:
-            禁用按钮
-        SkinWrap完成:
-            启用按钮
+        Control button clickability
+        SkinWrap not complete:
+        Disable button
+        SkinWrap complete:
+        Enable button
         """
         return (
             runtime.calc_ready
@@ -84,7 +83,7 @@ class VAM_OT_GeneratePackage(
             if hair_data is None:
                 self.report({'ERROR'},"hair result missing")
                 #
-                # 防止状态错误
+                # Preventing status errors
                 #
                 runtime.calc_ready=False
                 return {
@@ -97,7 +96,6 @@ class VAM_OT_GeneratePackage(
                 {'INFO'},
                 "Generating Hair VAB..."
             )
-            
             generate_hair_vab(
                 genesis,
                 clothing_hair_obj,
@@ -139,7 +137,6 @@ class VAM_OT_GeneratePackage(
             return {
                 'FINISHED'
             }
-        
         ##################################################
         # clothes Packing pipeline
         ##################################################
@@ -152,18 +149,16 @@ class VAM_OT_GeneratePackage(
             if wrap_data is None:
                 self.report({'ERROR'},"SkinWrap result missing")
                 #
-                # 防止状态错误
+                # Preventing status errors
                 #
                 runtime.calc_ready=False
                 return {
                     'CANCELLED'
                 }
-            
             ##################################################
             # Build Mesh Data
             #
-            # 注意:
-            # 这里仍然需要，因为SkinWrap只保存计算结果
+            # This is still necessary because SkinWrap only saves the calculation results.
             #
             ##################################################
             self.report(
@@ -180,7 +175,6 @@ class VAM_OT_GeneratePackage(
                 {'INFO'},
                 "Generating VAB..."
             )
-
             generate_vab(
                 genesis,
                 clothing_hair_obj,
@@ -223,6 +217,29 @@ class VAM_OT_GeneratePackage(
             return {
                 'FINISHED'
             }
+class VAM_OT_RESAMPLE_HAIR(
+        bpy.types.Operator
+):
+    bl_idname="vam.resample_curve_hair"
+    bl_label="Resample Hair"
+    def execute(self, context: bpy.types.Context)-> set[OperatorReturn]:
+        scene = context.scene
+        props = scene.vamgen_props
+        target_segments = props.hair_segments
+        selected_objs = context.selected_objects
+        if not selected_objs:
+            self.report({'WARNING'}, "No Curve objects are selected.")
+            return {'CANCELLED'}
+        for obj in selected_objs:
+            was_in_editmode = (obj.mode == 'EDIT')
+            if was_in_editmode:
+                bpy.ops.object.mode_set(mode='OBJECT')
+            resample_curve_object(obj, target_segments)
+            if was_in_editmode:
+                bpy.ops.object.mode_set(mode='EDIT')
+
+        self.report({'INFO'}, f"Resampling successful, current Segment number: {target_segments}")
+        return {'FINISHED'}
 # 1. Define the first button's operator
 class VAM_OT_IMPORT(bpy.types.Operator):
     bl_idname = "vam.ot_loadatom"
@@ -343,92 +360,74 @@ class VAM_OT_SELECTTRIANGLES(bpy.types.Operator):
         bmesh.update_edit_mesh(me)
         self.report({'INFO'}, f"Successfully selected face Index: {triangles_id}")
         return {'FINISHED'}
-
 class VAM_OT_SETSPLINEROOT(bpy.types.Operator):
-    """将曲线编辑模式中选中的顶点设为当前 Spline 的起点"""
+    """Set the selected vertex in curve editing mode as the starting point of the current spline."""
     bl_idname = "vam.ot_setsplineroot"
     bl_label = "Set Selected Point as Root"
     bl_options = {'REGISTER', 'UNDO'}
-
     @classmethod
     def poll(cls, context):
         return (context.active_object is not None and 
                 context.active_object.type == 'CURVE' and 
                 context.mode == 'EDIT_CURVE')
-
     def execute(self, context: bpy.types.Context)-> set[OperatorReturn]:
         selected_objs = context.selected_objects
         if not selected_objs or len(selected_objs) != 1:
-            self.report({'WARNING'}, "请确保仅选中了一个曲线对象！")
+            self.report({'WARNING'}, "Please ensure that only one curve object is selected.")
             return {'CANCELLED'}
-
         curve_obj = selected_objs[0]
         if curve_obj.type != 'CURVE' or not isinstance(curve_obj.data, bpy.types.Curve):
-            self.report({'WARNING'}, "选中的对象不是曲线 (Curve)！")
+            self.report({'WARNING'}, "The selected object is not a curve. (Curve)！")
             return {'CANCELLED'}
-
         curve_data = curve_obj.data
-        
-        # 必须先切回 OBJECT 模式刷新数据流，处理完毕后再切回 EDIT 模式
+        # You must first switch back to OBJECT mode to refresh the data stream, and then switch back to EDIT mode after processing is complete.
         bpy.ops.object.mode_set(mode='OBJECT')
-
         modified_count = 0
-
         for spline in curve_data.splines:
             target_index = -1
-
-            # 1. 查找当前 Spline 中选中的顶点索引
+            # 1. Find the index of the selected vertex in the current spline.
             if spline.type == 'BEZIER':
                 for i, pt in enumerate(spline.bezier_points):
                     if pt.select_control_point:
                         target_index = i
                         break
-            else:  # POLY 或 NURBS
+            else:  # POLY or NURBS
                 for i, pt in enumerate(spline.points):
                     if pt.select:
                         target_index = i
                         break
-
-            # 未选中点，或者选中的点已经是起点(Index 0)
+            # No point is selected, or the selected point is already the starting point (Index 0).
             if target_index <= 0:
                 continue
-
-            # 2. 根据曲线是否闭合（use_cyclic_u）以及 Spline 类型进行处理
+            # 2. Processing depends on whether the curve is closed (use_cyclic_u) and the Spline type.
             if spline.use_cyclic_u:
-                # 闭合曲线：按选中点作为 Index 0 进行循环移位
                 if spline.type == 'BEZIER':
                     self.shift_bezier_spline(spline, target_index)
                 else:
                     self.shift_poly_spline(spline, target_index)
             else:
-                # 非闭合曲线：翻转整条曲线的方向（首尾颠倒）
+                # Non-closed curve: Reverse the direction of the entire curve (invert the beginning and end).
                 if spline.type == 'BEZIER':
                     self.reverse_bezier_spline(spline)
                 else:
                     self.reverse_poly_spline(spline)
-
             modified_count += 1
-
-        # 重新回到编辑模式
+        # Return to edit mode
         bpy.ops.object.mode_set(mode='EDIT')
-
         if modified_count > 0:
-            self.report({'INFO'}, f"成功重置 {modified_count} 条样条线的起点！")
+            self.report({'INFO'}, f"Successfully reset the starting point of the {modified_count} spline!")
         else:
-            self.report({'WARNING'}, "未找到需要更新起点的选中顶点（或选中的顶点已经是起点）")
-
+            self.report({'WARNING'}, "No selected vertex for which the starting point needs to be updated was found (or the selected vertex is already the starting point).")
         return {'FINISHED'}
-
     def reverse_bezier_spline(self, spline):
-        """非闭合 Bézier 曲线：整条线序列翻转，且交换左右手柄"""
+        """Non-closed Bézier curve: The entire line sequence is flipped, and the left and right handles are swapped."""
         pts = list(spline.bezier_points)
-        
-        # 提取点属性数据
+        # Extract point attribute data
         data = []
         for p in pts:
             data.append({
                 'co': p.co.copy(),
-                # 关键：反转曲线方向时，原来的左手柄变成右手柄，右手柄变成左手柄
+                # Key Points: When reversing the curve direction, the original left handle becomes the right handle, and the right handle becomes the left handle.
                 'handle_left': p.handle_right.copy(),
                 'handle_right': p.handle_left.copy(),
                 'handle_left_type': p.handle_right_type,
@@ -438,14 +437,12 @@ class VAM_OT_SETSPLINEROOT(bpy.types.Operator):
                 'select_control_point': p.select_control_point,
                 'select_left_handle': p.select_right_handle,
                 'select_right_handle': p.select_left_handle,
-                'tilt': -p.tilt,  # 倾斜角反转
+                'tilt': -p.tilt,  # Tilt angle reversed
                 'weight_softbody': p.weight_softbody
             })
-
-        # 序列反转
+        # Sequence Reversal
         data.reverse()
-
-        # 写回数据
+        # Write back data
         for i, p in enumerate(pts):
             d = data[i]
             p.co = d['co']
@@ -460,11 +457,9 @@ class VAM_OT_SETSPLINEROOT(bpy.types.Operator):
             p.select_right_handle = d['select_right_handle']
             p.tilt = d['tilt']
             p.weight_softbody = d['weight_softbody']
-
     def reverse_poly_spline(self, spline):
-        """非闭合 Poly / NURBS 曲线：整条线序列翻转"""
+        """Non-closed Poly/NURBS curves: The entire line sequence is flipped."""
         pts = list(spline.points)
-        
         data = []
         for p in pts:
             data.append({
@@ -476,10 +471,8 @@ class VAM_OT_SETSPLINEROOT(bpy.types.Operator):
                 'weight': p.weight,
                 'weight_softbody': p.weight_softbody
             })
-
-        # 序列反转
+        # Sequence Reversal
         data.reverse()
-
         for i, p in enumerate(pts):
             d = data[i]
             p.co = d['co']
@@ -489,9 +482,8 @@ class VAM_OT_SETSPLINEROOT(bpy.types.Operator):
             p.tilt = d['tilt']
             p.weight = d['weight']
             p.weight_softbody = d['weight_softbody']
-
     def shift_bezier_spline(self, spline, root_idx):
-        """闭合 Bézier 曲线：按索引循环移位"""
+        """Closed Bézier curve: cyclic shift by index"""
         pts = list(spline.bezier_points)
         data = []
         for p in pts:
@@ -509,9 +501,7 @@ class VAM_OT_SETSPLINEROOT(bpy.types.Operator):
                 'tilt': p.tilt,
                 'weight_softbody': p.weight_softbody
             })
-
         new_data = data[root_idx:] + data[:root_idx]
-
         for i, p in enumerate(pts):
             d = new_data[i]
             p.co = d['co']
@@ -526,9 +516,8 @@ class VAM_OT_SETSPLINEROOT(bpy.types.Operator):
             p.select_right_handle = d['select_right_handle']
             p.tilt = d['tilt']
             p.weight_softbody = d['weight_softbody']
-
     def shift_poly_spline(self, spline, root_idx):
-        """闭合 Poly / NURBS 曲线：按索引循环移位"""
+        """Close Poly/NURBS curves: Cyclic shift by index"""
         pts = list(spline.points)
         data = []
         for p in pts:
@@ -541,9 +530,7 @@ class VAM_OT_SETSPLINEROOT(bpy.types.Operator):
                 'weight': p.weight,
                 'weight_softbody': p.weight_softbody
             })
-
         new_data = data[root_idx:] + data[:root_idx]
-
         for i, p in enumerate(pts):
             d = new_data[i]
             p.co = d['co']

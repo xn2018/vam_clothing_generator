@@ -71,6 +71,14 @@ class VAMGEN_Properties(bpy.types.PropertyGroup):
         items=HAIR_TYPES,
         default="Particles"
     ) # type: ignore
+
+    hair_segments: IntProperty(
+        name="Hair Segments",
+        description="Points per hair strand",
+        default=16,
+        min=2,
+        max=128
+    ) # type: ignore
     # --------------------------------------------------
     # VAJ
     # --------------------------------------------------

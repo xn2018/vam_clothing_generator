@@ -5,7 +5,7 @@ from .RuntimeCache.runtime import runtime
 from .operators.operators_calulation import VAM_OT_SKINWRAPCALC
 from .properties import VAMGEN_Properties
 from .ui import VAMGEN_PT_MainPanel
-from .operators.generate_package import VAM_OT_SELECTTRIANGLES, VAM_OT_SELECTVERT, VAM_OT_SETSPLINEROOT, VAM_OT_GeneratePackage,VAM_OT_IMPORT
+from .operators.generate_package import VAM_OT_RESAMPLE_HAIR, VAM_OT_SELECTTRIANGLES, VAM_OT_SELECTVERT, VAM_OT_SETSPLINEROOT, VAM_OT_GeneratePackage,VAM_OT_IMPORT
 bl_info = {
     "name": "Vam Clothing Generator",
     "author": "shyuecc",
@@ -23,7 +23,8 @@ classes = (
     VAM_OT_SKINWRAPCALC,
     VAM_OT_SELECTVERT,
     VAM_OT_SELECTTRIANGLES,
-    VAM_OT_SETSPLINEROOT
+    VAM_OT_SETSPLINEROOT,
+    VAM_OT_RESAMPLE_HAIR
 )
 def draw_skinwrap_progress(self,context):
     if not runtime.progress:

@@ -8,6 +8,7 @@ class VAMGEN_PT_MainPanel(bpy.types.Panel):
     def draw(self, context):
         layout = self.layout
         props = context.scene.vamgen_props
+
         if layout is None:
             return
         # --------------------------------------------------
@@ -56,6 +57,18 @@ class VAMGEN_PT_MainPanel(bpy.types.Panel):
             box.prop(
                 props,
                 "hair_type"
+            )
+            segment_layout = box.split(factor=0, align=True)
+            seg1 = segment_layout.column()
+            seg1.prop(
+                props,
+                "hair_segments"
+            )
+            seg2 = segment_layout.column()
+            seg2.operator(
+                "vam.resample_curve_hair",
+                icon="TRACKING",
+                text="Resample"
             )
         # --------------------------------------------------
         # VAJ

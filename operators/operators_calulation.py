@@ -134,17 +134,12 @@ class VAM_OT_SKINWRAPCALC(bpy.types.Operator):
         #
         # Create task
         #
-        #
-        # 注意:
-        # 这里现在不会执行build_daz_mesh
-        # 不会阻塞
-        #
         try:
             if props.package_type=="HairFemale":
                 self.task=create_hair_task(
                     props.genesis_obj,
                     props.clothing_hair_obj,
-                    5
+                    props.hair_type
                 )
             else:
                 self.task=create_skinwrap_task(

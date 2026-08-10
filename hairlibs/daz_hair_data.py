@@ -4,6 +4,10 @@ from mathutils import Vector
 from mathutils.kdtree import KDTree
 from dataclasses import dataclass, field
 @dataclass
+class HairStrandSource:
+    vertices:list[Vector]
+    weights:list[float]
+@dataclass
 class DAZHairStrand:
     """
     One hair strand.
