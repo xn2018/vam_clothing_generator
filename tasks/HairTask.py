@@ -57,7 +57,7 @@ class HairBuildTask:
         default_factory=list
     )
     hair_data:DAZHairData=field(default_factory=DAZHairData)
-    hair_type:str="particles"
+    hair_type:str="Particles"
     ##################################################
     # Cancel
     ##################################################
@@ -108,7 +108,7 @@ class HairBuildTask:
     def init_task(self):
         if self.scalp_obj is None:
             raise Exception(
-                "Genesis missing"
+                "scalp object missing"
             )
         if self.hair_obj is None:
             raise Exception(

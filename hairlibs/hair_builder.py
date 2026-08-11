@@ -2,8 +2,7 @@ from dataclasses import dataclass
 from typing import cast
 import bpy
 from mathutils import Vector
-from .daz_hair_data import DAZHairData, DAZHairStrand
-from .particle_hair_importer import ParticleHairImporter
+from .daz_hair_data import DAZHairStrand
 @dataclass
 class DAZHairRoot:
     index:int
@@ -151,170 +150,7 @@ def find_curve_hair_root(
             )
         )
     return roots
-# ==========================================================
-# sample curve
-# ==========================================================
-def sample_spline(
-        obj,
-        spline,
-        segments
-):
-    """
-    Sample Blender Curve spline
-    into fixed points.
-    Return:
-        list[Vector(world)]
-    """
-    points=[]
-    #
-    # BEZIER
-    #
-    if spline.type=="BEZIER":
-        bezier=spline.bezier_points
-        if len(bezier)<2:
-            return points
-        #
-        # only support first-last
-        # cubic spline
-        #
-        p0=bezier[0]
-        p3=bezier[-1]
-        for i in range(
-            segments
-        ):
-            t=i/(segments-1)
-            a=(
-                p0.co *
-                (1-t)**3
-            )
-            b=(
-                p0.handle_right *
-                3 *
-                (1-t)**2 *
-                t
-            )
-            c=(
-                p3.handle_left *
-                3 *
-                (1-t) *
-                t*t
-            )
-            d=(
-                p3.co *
-                t**3
-            )
-            co=a+b+c+d
-            points.append(
-                obj.matrix_world @ co
-            )
-    #
-    # POLY
-    #
-    else:
-        src=[]
-        for p in spline.points:
-            src.append(
-                Vector(
-                    (
-                        p.co.x,
-                        p.co.y,
-                        p.co.z
-                    )
-                )
-            )
-        points=sample_polyline(
-            [
-                obj.matrix_world @ p
-                for p in src
-            ],
-            segments
-        )
-    return points
-def sample_polyline(
-        points,
-        count
-):
-    """
-    Resample curve points
-    """
-    if len(points)<2:
-        return points
-    result=[]
-    total=len(points)-1
-    for i in range(count):
-        t=i/(count-1)
-        pos=t*total
-        index=int(pos)
-        factor=pos-index
-        if index>=total:
-            result.append(
-                points[-1]
-            )
-        else:
-            p1=points[index]
-            p2=points[index+1]
-            result.append(
-                p1.lerp(
-                    p2,
-                    factor
-                )
-            )
-    return result
-# ==========================================================
-# Convert Curve hair
-# ==========================================================
-def convert_curve_hair_to_dazhair(
-        eval_psys,
-        scalp_obj,
-        root_mapping
-    ):
-        scalp_mesh=cast(
-            bpy.types.Mesh,
-            scalp_obj.data
-        )
-        data=DAZHairData()
-        data.set_scalp_vertex_count(
-            len(scalp_mesh.vertices)
-        )
-        data.init_strands()
-        importer=ParticleHairImporter(
-            scalp_obj,
-            eval_psys=eval_psys
-        )
-        particles=importer.extract()
-        #
-        # set segments
-        #
-        data.segments = (
-            importer.segments
-        )
-        print(
-            "Particle hair segments:",
-            data.segments
-        )
-        if len(particles)!=len(root_mapping):
-            raise RuntimeError(
-                f"Particle count {len(particles)} "
-                f"mapping {len(root_mapping)}"
-            )
-        for particle,map_index in zip(
-            particles,
-            root_mapping
-        ):
-            data.add_strand(
-                scalp_index=map_index,
-                vertices=particle.vertices,
-                weights=particle.weights
-            )
-        #
-        # calculate average segment length
-        #
-        data.calculate_segment_length()
-        data.build_rigidities()
-        data.hair_root_to_scalp_indices=(
-            root_mapping
-        )
-        return data
+
 #==================================
 # resample_particle_strand
 #==================================
@@ -358,40 +194,7 @@ def resample_particle_strand(
         result_vertices,
         result_weights
     )
-#==================================
-# convert_particle_hair_to_dazhair
-#==================================
-def sample_weights(
-        weights,
-        count
-):
-    if len(weights)==count:
-        return weights
-    if len(weights)<2:
-        return [
-            weights[0]
-        ] * count
-    result=[]
-    total=len(weights)-1
-    for i in range(count):
-        t=i/(count-1)
-        pos=t*total
-        idx=int(pos)
-        factor=pos-idx
-        if idx>=total:
-            result.append(
-                weights[-1]
-            )
-        else:
-            value=(
-                weights[idx]*(1-factor)
-                +
-                weights[idx+1]*factor
-            )
-            result.append(
-                value
-            )
-    return result
+
 #======================================
 # convert_particle_hair_to_dazhair
 #======================================
