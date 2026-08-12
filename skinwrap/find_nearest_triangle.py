@@ -39,9 +39,7 @@ def find_nearest_triangle(
         tree = cache.body_bvh
         triangles = cache.body_triangles
     if tree is None:
-        raise RuntimeError(
-            "BVH is None"
-        )
+        raise RuntimeError("BVH is None")
     if not triangles:
         return None
     ##########################################################

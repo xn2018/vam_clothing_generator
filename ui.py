@@ -58,18 +58,19 @@ class VAMGEN_PT_MainPanel(bpy.types.Panel):
                 props,
                 "hair_type"
             )
-            segment_layout = box.split(factor=0, align=True)
-            seg1 = segment_layout.column()
-            seg1.prop(
-                props,
-                "hair_segments"
-            )
-            seg2 = segment_layout.column()
-            seg2.operator(
-                "vam.resample_curve_hair",
-                icon="TRACKING",
-                text="Resample"
-            )
+            if props.hair_type == "Curve":
+                segment_layout = box.split(factor=0, align=True)
+                seg1 = segment_layout.column()
+                seg1.prop(
+                    props,
+                    "hair_segments"
+                )
+                seg2 = segment_layout.column()
+                seg2.operator(
+                    "vam.resample_curve_hair",
+                    icon="TRACKING",
+                    text="Resample"
+                )
         # --------------------------------------------------
         # VAJ
         # --------------------------------------------------

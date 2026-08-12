@@ -2,19 +2,19 @@ import bpy
 import mathutils
 
 # =========================================================================
-# 1. 核心算法：对单条 Spline 计算弧长等距采样坐标
+# 1. Core algorithm: Calculate the arc length of a single spline using equidistant sampling coordinates.
 # =========================================================================
 def get_resampled_coords_for_spline(spline, target_segments):
     """
-    接收一条 spline，返回按 target_segments 采样后的坐标列表 [(x, y, z), ...]
+    Receive a spline and return a list of coordinates sampled by target_segments. [(x, y, z), ...]
     """
     if target_segments < 1:
         return []
     
-    # 获取原始点的坐标集合
+    # Obtain the set of coordinates of the original point
     eval_points = []
     if spline.type == 'BEZIER' and len(spline.bezier_points) > 0:
-        # 如果是 BEZIER，这里简单获取控制点（若想更平滑可依靠更高密度的采样）
+        # For BEZIER, the control points are simply obtained here (a higher density sampling can be used for smoother results).
         for bp in spline.bezier_points:
             eval_points.append(bp.co.copy())
     elif len(spline.points) > 0:
@@ -24,7 +24,7 @@ def get_resampled_coords_for_spline(spline, target_segments):
     if len(eval_points) < 2:
         return []
 
-    # 1. 计算累积弧长 (Cumulative Arc Lengths)
+    # 1. Calculate cumulative arc length (Cumulative Arc Lengths)
     lengths = [0.0]
     total_length = 0.0
     for i in range(1, len(eval_points)):
@@ -35,7 +35,7 @@ def get_resampled_coords_for_spline(spline, target_segments):
     if total_length == 0:
         return []
 
-    # 2. 按目标 Segment 等间距寻找插值点
+    # 2. Find interpolation points at equal intervals according to the target segment.
     is_cyclic = spline.use_cyclic_u
     num_points = target_segments if is_cyclic else (target_segments + 1)
     step = total_length / target_segments
@@ -65,12 +65,12 @@ def get_resampled_coords_for_spline(spline, target_segments):
 
 
 # =========================================================================
-# 2. 重构多线段 Resample 逻辑
+# 2. Resample logic for refactoring multi-segment
 # =========================================================================
 def resample_curve_object(obj, target_segments):
     curve = obj.data
     
-    # 记录原先每条 Spline 重采样后的新坐标和闭合状态
+    # Record the new coordinates and closure state of each original spline after resampling.
     all_splines_new_data = []
     for spline in curve.splines:
         coords = get_resampled_coords_for_spline(spline, target_segments)
@@ -80,15 +80,15 @@ def resample_curve_object(obj, target_segments):
                 'use_cyclic_u': spline.use_cyclic_u
             })
             
-    # 清空原对象中的所有 Splines（防止索引冲突或数据错乱）
+    # Clear all splines in the original object (to prevent index conflicts or data corruption).
     curve.splines.clear()
     
-    # 重新为每一条 Strand 创建 Spline 并写入数据
+    # Recreate the Spline for each Strand and write the data.
     for spline_data in all_splines_new_data:
         coords = spline_data['coords']
         new_spline = curve.splines.new(type='POLY')
         
-        # new() 创建时默认已有 1 个点，因此只需要 add(N - 1) 个点
+        # The `new()` function creates a node that already has one node by default, so you only need to add (N - 1) nodes.
         new_spline.points.add(len(coords) - 1)
         
         for idx, coord in enumerate(coords):

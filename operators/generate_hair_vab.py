@@ -8,14 +8,6 @@ def generate_hair_vab(
         author_name,
         output_dir
 ):
-    if genesis is None:
-        raise Exception(
-            "Genesis object not selected"
-        )
-    if hair_obj is None:
-        raise Exception(
-            "Hair curve object not selected"
-        )
     if hair_data is None:
         raise Exception(
             "DAZHairData missing"

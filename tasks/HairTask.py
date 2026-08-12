@@ -110,14 +110,10 @@ class HairBuildTask:
             raise Exception(
                 "scalp object missing"
             )
-        if self.hair_obj is None:
-            raise Exception(
-                "Hair object missing"
-            )
-        if type(self.hair_obj.data) is not bpy.types.Curve :
-            raise Exception(
-                "Hair object must be Curve"
-            )
+        if self.hair_type == "Curve" and self.hair_obj is None:
+            raise Exception("Hair object missing")
+        if self.hair_type == "Curve" and type(self.hair_obj.data) is not bpy.types.Curve :
+            raise Exception("Hair object must be Curve")
         self.progress_value=0.05
         self.state=(
             HairState.BUILD_ROOT

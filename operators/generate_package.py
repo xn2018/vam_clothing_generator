@@ -26,15 +26,15 @@ class VAM_OT_GeneratePackage(
     ):
         """
         Control button clickability
-        SkinWrap not complete:
+        Calc not complete:
         Disable button
-        SkinWrap complete:
+        Calc complete:
         Enable button
         """
         return (
             runtime.calc_ready
             and
-            not runtime.skinwrap_running
+            not runtime.calc_running
         )
     def execute(
         self,
@@ -48,21 +48,16 @@ class VAM_OT_GeneratePackage(
         clothing_hair_obj = props.clothing_hair_obj
         package_type = props.package_type
         if genesis is None:
-            self.report(
-                {'ERROR'},
-                "Genesis mesh not selected"
-            )
-            return {
-                'CANCELLED'
-            }
-        if clothing_hair_obj is None:
-            self.report(
-                {'ERROR'},
-                "Clothing mesh not selected"
-            )
-            return {
-                'CANCELLED'
-            }
+            self.report({'ERROR'},"Genesis mesh not selected")
+            return {'CANCELLED'}
+        if props.package_type not in ("HairFemale", "HairMale", "HairNautral"):
+            if props.clothing_hair_obj is None:
+                self.report({'ERROR'},"Clothing object missing")
+                return {'CANCELLED'}
+        
+        elif props.hair_type == "Curve" and props.clothing_hair_obj is None:
+            self.report({'ERROR'},"Hair Curve object missing")
+            return {'CANCELLED'}
         ##################################################
         # Output Directory
         ##################################################

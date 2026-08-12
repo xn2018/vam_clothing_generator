@@ -201,12 +201,14 @@ def build_anchor_triangle_cache(
             )
         polygons.append(ids)
     if len(polygons) > 0:
+        print("[anchor_bvh] polygons is valid")
         anchor_bvh = BVHTree.FromPolygons(
             vertices,
             polygons,
             all_triangles=True
         )
     else:
+        print("[anchor_bvh] polygons is 0")
         anchor_bvh = None
     cache.anchor_bvh = anchor_bvh
     ##########################################################

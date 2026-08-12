@@ -11,9 +11,7 @@ class ParticleHairImporter:
         self.segments = 0
     def extract(self):
         if self.psys is None:
-            raise RuntimeError(
-                "No particle system"
-            )
+            raise RuntimeError("No particle system")
         result=[]
         segment_set=set()
         for index,p in enumerate(

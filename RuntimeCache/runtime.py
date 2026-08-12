@@ -2,7 +2,7 @@ from dataclasses import field
 from ..hairlibs.daz_hair_data import DAZHairData
 from ..wrap.wrap_types import DAZBuildResult, DAZMeshData, DAZTopology, FlippedTriangles, SkinWrapVertex
 class VAMRuntime:
-    skinwrap_running: bool = False
+    calc_running: bool = False
     calc_ready: bool = False 
     skinwrap_result: list[SkinWrapVertex]
     progress: float = 0.0

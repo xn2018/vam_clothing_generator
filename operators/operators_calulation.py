@@ -83,7 +83,7 @@ class VAM_OT_SKINWRAPCALC(bpy.types.Operator):
         #
         # Runtime state
         #
-        runtime.skinwrap_running=False
+        runtime.calc_running=False
         if reset_ready:
             runtime.calc_ready=False
         if reset_progress:
@@ -101,10 +101,11 @@ class VAM_OT_SKINWRAPCALC(bpy.types.Operator):
     )->set[OperatorReturn]:
         props=context.scene.vamgen_props
         self.package_type = props.package_type
-        if runtime.skinwrap_running:
+        self.hair_type = props.hair_type
+        if runtime.calc_running:
             self.report(
                 {'WARNING'},
-                "SkinWrap already running"
+                "calulation already running"
             )
             return {
                 'CANCELLED'
@@ -112,24 +113,18 @@ class VAM_OT_SKINWRAPCALC(bpy.types.Operator):
         if props.genesis_obj is None:
             self.report(
                 {'ERROR'},
-                "Genesis missing"
+                "Genesis or Scalp missing"
             )
             return {
                 'CANCELLED'
             }
-        if props.clothing_hair_obj is None:
-            self.report(
-                {'ERROR'},
-                "Clothing missing"
-            )
-            return {
-                'CANCELLED'
-            }
+
+    
         #
         # Runtime state
         #
         runtime.calc_ready=False
-        runtime.skinwrap_running=True
+        runtime.calc_running=True
         runtime.progress=0.0
         #
         # Create task
@@ -250,7 +245,7 @@ class VAM_OT_SKINWRAPCALC(bpy.types.Operator):
                         task = cast(SkinWrapTask,self.task)
                         runtime.skinwrap_result=(task.get_result())
                     runtime.calc_ready=True
-                    runtime.skinwrap_running=False
+                    runtime.calc_running=False
                     runtime.progress=1.0
                     self.refresh_ui(context)
                     self.cleanup(
