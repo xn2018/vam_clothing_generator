@@ -167,3 +167,14 @@ class VAMGEN_PT_MainPanel(bpy.types.Panel):
             icon="MOD_PARTICLE_INSTANCE",
             text="Set Spline Root"
         )
+        split_validate_dev = box_gen.split(factor=0, align=True)
+        col1 = split_validate_dev.column()
+        col1.label(
+            text="Cache Self-Test"
+        )
+        col2 = split_validate_dev.column()
+        col2.operator(
+            "vam.ot_validatecache",
+            icon="CHECKMARK",
+            text="Validate Cache"
+        )

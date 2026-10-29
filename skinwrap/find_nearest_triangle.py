@@ -1,86 +1,50 @@
-# ============================================================
-# find_nearest_triangle
-# ============================================================
 from mathutils import Vector
-
-from ..wrap.bvh_wrap import build_anchor_triangle_cache, get_cache
+from ..wrap.bvh_wrap import get_cache
 from ..wrap.wrap_types import TriangleInfo
+
+
+def _select_tree(cache, anchor_only: bool):
+    if anchor_only and cache.anchor_bvh is not None and cache.anchor_triangles:
+        # 映射表必须与三角形表等长；不一致时宁可回退全身，也不能用错下标
+        if len(cache.anchor_bvh_to_triangle) == len(cache.anchor_triangles):
+            return cache.anchor_bvh, cache.anchor_triangles, cache.anchor_bvh_to_triangle
+    # 防御性回退：anchor 不可用时用全身 BVH，绝不 raise
+    return cache.body_bvh, cache.body_triangles, cache.bvh_to_triangle
 
 
 def find_nearest_triangle(
     pos: Vector,
     wrap_normal: Vector | None,
     *,
-    anchor_only=False,
-    check_normals=False,
+    anchor_only: bool = False,
+    check_normals: bool = False,
     normal_dot_limit=0,
-)->TriangleInfo|None:
+) -> TriangleInfo | None:
+
     cache = get_cache()
     if cache is None:
-        raise RuntimeError(
-            "find_nearest_triangle cache is None"
-        )
-    ##########################################################
-    # Select BVH
-    ##########################################################
-    if anchor_only:
-        if (
-            cache.anchor_bvh is None
-            or
-            not cache.anchor_triangles
-        ):
-            build_anchor_triangle_cache(
-                cache,
-                min_anchor_vertices=3
-            )
-        tree = cache.anchor_bvh
-        triangles = cache.anchor_triangles
-    else:
-        tree = cache.body_bvh
-        triangles = cache.body_triangles
-    if tree is None:
-        raise RuntimeError("BVH is None")
-    if not triangles:
         return None
-    ##########################################################
-    # BVH Nearest
-    ##########################################################
-    hit = tree.find_nearest(
-        (
-            pos.x,
-            pos.y,
-            pos.z
-        )
-    )
+
+    tree, triangles, mapping = _select_tree(cache, anchor_only)
+    if tree is None or not triangles or not mapping:
+        return None
+
+    hit = tree.find_nearest((pos.x, pos.y, pos.z))
     if hit is None:
         return None
-    (location,normal,polygon_index,distance) = hit
-    if polygon_index is None:
+    _location, _bvh_normal, polygon_index, _distance = hit
+
+    # ← 关键防护：BVH 下标只能通过映射表翻译，且必须双向越界检查
+    if polygon_index is None or not (0 <= polygon_index < len(mapping)):
         return None
-    if polygon_index < 0:
+    tri_index = mapping[polygon_index]
+    if tri_index < 0 or tri_index >= len(triangles):
         return None
-    ##########################################################
-    # Get TriangleInfo
-    ##########################################################
-    if polygon_index >= len(triangles):
-        return None
-    tri = triangles[
-        polygon_index
-    ]
-    ##########################################################
-    # Normal Check
-    ##########################################################
-    if (
-        wrap_normal is not None
-        and
-        check_normals
-    ):
-        dot = (
-            wrap_normal.dot(
-                tri.normal
-            )
-        )
-        if dot < normal_dot_limit:
-            print("BACKFACE",polygon_index,dot)
-            return None
+
+    tri = triangles[tri_index]
+
+    if wrap_normal is not None and check_normals:
+        if wrap_normal.dot(tri.normal) < normal_dot_limit:
+            return None        # 不要 print，20k 顶点会刷爆控制台
+
     return tri

@@ -3,6 +3,7 @@ import bpy
 from mathutils import Vector
 from mathutils.bvhtree import BVHTree
 from .build_mesh_cache_from_object import build_mesh_cache_from_object
+from .mesh_inspect import geometry_signature, get_anchor_signature
 from .wrap_types import DAZMeshData, PerSkinWrapCalculationResult, SkinWrapCache, SkinWrapVertex, WrapInputVertex
 from typing import Optional
 def empty_result():
@@ -47,8 +48,11 @@ def print_cache_info():
         print("Object      :", _CACHE.object_name)
         print("Vertices    :", _CACHE.vertex_count)
         print("Triangles   :", _CACHE.triangle_count)
+        print("Body source :", _CACHE.body_source)
+        print("Base / UV   :", _CACHE.body_base_count, "/", _CACHE.body_uv_count)
         print("AnchorVert  :", len(_CACHE.anchor_vertices))
-        print("BVH         :", _CACHE.bvh is not None)
+        print("Body BVH    :", _CACHE.body_bvh is not None)
+        print("Anchor BVH  :", _CACHE.anchor_bvh is not None)
         print()
 # ============================================================
 # Get Cache
@@ -87,141 +91,52 @@ def validate_cache(
 # ============================================================
 # Ensure Cache
 # ============================================================
-def ensure_cache(
-    genesis_obj: bpy.types.Object
-)->SkinWrapCache|None:
+def ensure_cache(genesis_obj):
     global _CACHE
-    #
-    # First Build
-    #
-    if _CACHE is None:
-        _CACHE = build_mesh_cache_from_object(
-            genesis_obj
-        )
-        return _CACHE
-    #
-    # Not Ready
-    #
-    if not _CACHE.initialized:
-        _CACHE = build_mesh_cache_from_object(
-            genesis_obj
-        )
-        return _CACHE
-    #
-    # Object Changed
-    #
-    if _CACHE.object_name != genesis_obj.name:
-        _CACHE = build_mesh_cache_from_object(
-            genesis_obj
-        )
-        return _CACHE
-    #
-    # Vertex Count Changed
-    #
+    sig = geometry_signature(genesis_obj)
+    anchor_sig = get_anchor_signature(genesis_obj)
+
     if (
-        _CACHE.body_mesh is None
-        or
-        _CACHE.vertex_count != len(
-            _CACHE.body_mesh.base_vertices
-        )
+        _CACHE is None
+        or not _CACHE.initialized
+        or _CACHE.object_name != genesis_obj.name
+        or _CACHE.mesh_pointer != genesis_obj.data.as_pointer()
+        or _CACHE.geometry_signature != sig
+        or _CACHE.anchor_signature != anchor_sig
+        or _CACHE.body_mesh is None
+        or _CACHE.body_bvh is None
+        or _CACHE.body_base_count <= 0
+        or _CACHE.vertex_count != len(genesis_obj.data.vertices)
     ):
-        _CACHE = build_mesh_cache_from_object(
-            genesis_obj
-        )
-        return _CACHE
-    #
-    # Cache valid
-    #
+        _CACHE = build_mesh_cache_from_object(genesis_obj)
     return _CACHE
 # ============================================================
 # build_anchor_triangle_cache
 # ============================================================
-def build_anchor_triangle_cache(
-    cache: SkinWrapCache,
-    min_anchor_vertices=3
-):
-    ##########################################################
-    # Collect anchor triangles
-    ##########################################################
-    anchor = set(
-        cache.anchor_vertices
-    )
-    anchor_triangles = []
-    for tri in cache.body_triangles:
-        count = 0
-        if tri.vertex1 in anchor:
-            count += 1
-        if tri.vertex2 in anchor:
-            count += 1
-        if tri.vertex3 in anchor:
-            count += 1
-        #
-        # Official Logic: 
-        #
-        # triangle must be entirely within the anchor region
-        #
-        if count >= min_anchor_vertices:
-            anchor_triangles.append(
-                tri
-            )
-    cache.anchor_triangles = anchor_triangles
-    ##########################################################
-    # Build BVH
-    ##########################################################
-    vertices = []
-    polygons = []
-    vertex_map = {}
-    for tri in anchor_triangles:
-        ids = []
-        for index, co in (
-            (
-                tri.vertex1,
-                tri.v1
-            ),
-            (
-                tri.vertex2,
-                tri.v2
-            ),
-            (
-                tri.vertex3,
-                tri.v3
-            ),
-        ):
+def build_anchor_triangle_cache(cache: SkinWrapCache, min_anchor_vertices=3):
+    anchor = set(cache.anchor_vertices)
+    ids = [t.triangle_id for t in cache.body_triangles
+           if sum(1 for v in (t.vertex1, t.vertex2, t.vertex3) if v in anchor)
+              >= min_anchor_vertices]
+
+    cache.anchor_triangles = [cache.body_triangles[i] for i in ids]
+    cache.anchor_bvh_to_triangle = list(range(len(cache.anchor_triangles)))
+
+    if not cache.anchor_triangles:
+        cache.anchor_bvh = None
+        return
+
+    vertex_map, vertices, polygons = {}, [], []
+    for tri in cache.anchor_triangles:
+        local = []
+        for index, co in ((tri.vertex1, tri.v1), (tri.vertex2, tri.v2), (tri.vertex3, tri.v3)):
             if index not in vertex_map:
                 vertex_map[index] = len(vertices)
-                vertices.append(
-                    (
-                        float(co.x),
-                        float(co.y),
-                        float(co.z)
-                    )
-                )
-            ids.append(
-                vertex_map[index]
-            )
-        polygons.append(ids)
-    if len(polygons) > 0:
-        print("[anchor_bvh] polygons is valid")
-        anchor_bvh = BVHTree.FromPolygons(
-            vertices,
-            polygons,
-            all_triangles=True
-        )
-    else:
-        print("[anchor_bvh] polygons is 0")
-        anchor_bvh = None
-    cache.anchor_bvh = anchor_bvh
-    ##########################################################
-    # Debug
-    ##########################################################
-    print(
-        "[SkinWrap] Anchor triangles:",
-        len(anchor_triangles)
-    )
-    print(
-        "[SkinWrap] Anchor BVH:",
-        anchor_bvh
-    )
+                vertices.append((float(co.x), float(co.y), float(co.z)))
+            local.append(vertex_map[index])
+        polygons.append(local)
+
+    cache.anchor_bvh = BVHTree.FromPolygons(vertices, polygons, all_triangles=True)
 # ============================================================
 # Reorder Triangle
 # ============================================================

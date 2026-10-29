@@ -6,6 +6,7 @@ from enum import Enum, auto
 from ..wrap.bvh_wrap import calculate_skinwrap_matrix
 from ..wrap.build_daz_mesh import build_daz_mesh
 from ..wrap.build_wrap_vertices import build_wrap_vertices
+from ..wrap.bvh_wrap import build_anchor_triangle_cache, ensure_cache
 from ..wrap.wrap_types import (
     DAZBuildResult,
     FlippedTriangles,
@@ -17,6 +18,18 @@ from ..skinwrap.mesh_validate import check_uv_winding
 from ..skinwrap.skinwrap_vertex import (
     calculate_skinwrap_vertex
 )
+##################################################
+# Progress phases
+#
+# The status bar shows task.progress directly, so every phase must be
+# >= the previous one.  The per-vertex phase continues from
+# PROGRESS_BUILD_CALC_DATA up to 1.0 (it used to restart at 0.25, which
+# made the bar jump backwards right after the cache was built).
+##################################################
+PROGRESS_VALIDATE_MESH = 0.10
+PROGRESS_BUILD_CLOTHING = 0.30
+PROGRESS_BUILD_WRAP_VERTICES = 0.40
+PROGRESS_BUILD_CALC_DATA = 0.50
 ##################################################
 # State Machine
 ##################################################
@@ -55,6 +68,7 @@ class SkinWrapTask:
     )
     error:Exception|None=None
     progress_value:float=0.0
+    anchor_fallback:bool=False
     ##################################################
     # Prepared Data
     ##################################################
@@ -128,7 +142,7 @@ class SkinWrapTask:
         if winding["ratio"]>0.05:
             self.need_fix_uv=True
             print("The inverted UVs have been found. Please check your clothing mesh UVs.")
-        self.progress_value=0.1
+        self.progress_value=PROGRESS_VALIDATE_MESH
         self.state=SkinWrapState.BUILD_CLOTHING
     ##################################################
     # Step 1
@@ -141,7 +155,7 @@ class SkinWrapTask:
                 split_material=True
             )
         )
-        self.progress_value=0.3
+        self.progress_value=PROGRESS_BUILD_CLOTHING
         self.state=(
             SkinWrapState.BUILD_WRAP_VERTICES
         )
@@ -158,7 +172,7 @@ class SkinWrapTask:
                 self.clothing_data.mesh
             )
         )
-        self.progress_value=0.4
+        self.progress_value=PROGRESS_BUILD_WRAP_VERTICES
         self.state=(
             SkinWrapState.BUILD_CALC_DATA
         )
@@ -167,9 +181,20 @@ class SkinWrapTask:
     ##################################################
     def build_calc_data(self):
         if self.clothing_data is None:
-            raise RuntimeError(
-                "Clothing data missing"
-            )
+            raise RuntimeError("Clothing data missing")
+
+        # 首次 CALC 时 _CACHE 还不存在，get_cache() 会抛错，必须用 ensure_cache()
+        cache = ensure_cache(self.genesis_obj)
+        anchor_only = self.anchor_only
+        self.anchor_fallback = False
+
+        if anchor_only:
+            build_anchor_triangle_cache(cache, min_anchor_vertices=3)   # 一次构建，成对写入
+            if cache.anchor_bvh is None or not cache.anchor_triangles:
+                anchor_only = False
+                self.anchor_fallback = True
+                print("[SkinWrap] anchor 顶点组为空或过稀，回退全身 BVH")
+
         self.calc_data = (
             calculate_skinwrap_matrix(
                 genesis_obj=
@@ -179,7 +204,7 @@ class SkinWrapTask:
                 wrap_vertices=
                     self.wrap_vertices,
                 anchor_only=
-                    self.anchor_only,
+                    anchor_only,
                 wrap_check_normals=
                     self.wrap_check_normals,
                 max_wrap_distance=
@@ -191,7 +216,7 @@ class SkinWrapTask:
             for _
             in self.wrap_vertices
         ]
-        self.progress_value=0.5
+        self.progress_value=PROGRESS_BUILD_CALC_DATA
         self.state=(
             SkinWrapState.CALCULATE_VERTEX
         )
@@ -246,12 +271,15 @@ class SkinWrapTask:
                 self.empty_count[k]+=v
         self.index=end
         if total:
-            self.progress_value = (
-                0.25
-                +
-                0.75 *
-                self.index /
-                total
+            # Continue from the phase value instead of restarting at 0.25;
+            # max() keeps the bar monotonic even if a phase ever reports
+            # ahead of the per-vertex ratio.
+            self.progress_value = max(
+                self.progress_value,
+                PROGRESS_BUILD_CALC_DATA
+                + (1.0 - PROGRESS_BUILD_CALC_DATA)
+                * self.index
+                / total
             )
         if self.index>=total:
             self.state=(

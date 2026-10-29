@@ -14,7 +14,9 @@ def generate_vab(
             daz_mesh: DAZMeshData,
             wrap_data: list[SkinWrapVertex],
             author_name: str,
-            output_dir: str
+            output_dir: str,
+            body_base_count: int | None = None,
+            body_triangle_count: int | None = None
         ):
 
     """
@@ -50,7 +52,9 @@ def generate_vab(
         author_name=author_name,
         clothing_hair_id=clothing_hair_id,
         topology=topology,
-        daz_mesh=daz_mesh
+        daz_mesh=daz_mesh,
+        body_base_count=body_base_count,
+        body_triangle_count=body_triangle_count
     )
 
     print("")

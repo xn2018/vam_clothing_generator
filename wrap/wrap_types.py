@@ -126,6 +126,17 @@ class UVMeshBuildResult:
     uv_poly_list:list[MeshPoly]
 @dataclass(slots=True)
 class SkinWrapCache:
+    geometry_signature: tuple = ()
+    normal_mismatch: int = 0
+    normal_non_unit: int = 0
+    anchor_bvh_to_triangle: list[int] = field(default_factory=list)
+    #
+    # Genesis base/UV vertex space bookkeeping
+    #
+    body_base_count: int = 0
+    body_uv_count: int = 0
+    body_map_count: int = 0
+    body_source: str = ""
     object_name: str = ""
     #
     # Genesis body mesh
@@ -160,6 +171,7 @@ class SkinWrapCache:
         default_factory=list
     )
     anchor_bvh: BVHTree | None = None
+    anchor_signature: tuple[int, ...] = ()
     #
     # Statistics
     #

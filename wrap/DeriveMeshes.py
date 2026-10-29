@@ -29,6 +29,203 @@ def build_base_mesh(
         base_vertices=base_vertices,
         base_poly_list=base_poly_list
     )
+def debug_vertex_topology(
+    mesh: bpy.types.Mesh,
+    uv_layer: bpy.types.MeshUVLoopLayer,
+    uv_vertices: list[Vector],
+    uv_triangles: list[int],
+    target_vertex: int = 158,
+) -> None:
+    print("\n" + "=" * 80)
+    print(f"Vertex topology debug: base vertex {target_vertex}")
+    print("=" * 80)
+
+    if not (0 <= target_vertex < len(mesh.vertices)):
+        print(f"Invalid base vertex index: {target_vertex}")
+        return
+
+    print("Base vertex coordinate:", mesh.vertices[target_vertex].co[:])
+
+    # 1. 找到该基础顶点对应的所有 UV 顶点。
+    uv_vertex_indices = set()
+
+    for poly in mesh.polygons:
+        for loop_index in poly.loop_indices:
+            loop = mesh.loops[loop_index]
+
+            if loop.vertex_index == target_vertex:
+                uv = uv_layer.data[loop_index].uv
+
+                # 根据 build_uv_mesh 的顶点复用规则查找。
+                for uv_index, uv_co in enumerate(uv_vertices):
+                    if (
+                        (uv_co - mesh.vertices[target_vertex].co).length
+                        < 1e-6
+                    ):
+                        # 这里只能筛选位置相同的候选顶点，
+                        # 不能仅凭三维坐标确定 UV 顶点身份。
+                        pass
+
+                print(
+                    f"Polygon={poly.index}, "
+                    f"loop={loop_index}, "
+                    f"UV=({uv.x:.8f}, {uv.y:.8f})"
+                )
+
+    print("\nUV triangle references:")
+
+    # 2. 输出包含基础顶点 158 的三角形。
+    # 注意：uv_triangles 使用的是 UV 顶点索引，
+    # 因此不能直接用 target_vertex 比较。
+    # 此处需要通过 build_uv_mesh 的实际 UV 映射进一步确认。
+    print(
+        "Inspect uv_triangles using the UV indices identified "
+        "from build_uv_mesh."
+    )
+
+    print("=" * 80)
+def validate_uv_triangle_mapping(
+    base_vertices: list[Vector],
+    uv_vertices: list[Vector],
+    base_triangles: list[int],
+    uv_triangles: list[int],
+    vertex_maps: list[MeshtoUVMapping],
+    orig_uv: list[Vector] | None = None,
+    max_errors: int = 20,
+) -> None:
+    base_count = len(base_vertices)
+    uv_count = len(uv_vertices)
+
+    print("=== UV semantic mapping validation ===")
+
+    # 当前 build_uv_mesh 的设计：
+    # 前 base_count 个 UV 顶点与基础顶点一一对应。
+    uv_to_base = [
+        i if i < base_count else -1
+        for i in range(uv_count)
+    ]
+
+    # 将重复 UV 顶点映射回其对应的基础顶点。
+    for map_index, vm in enumerate(vertex_maps):
+        if not (0 <= vm.fromvert < uv_count):
+            print(
+                f"ERROR: vertex_maps[{map_index}].fromvert "
+                f"out of range: {vm.fromvert}"
+            )
+            continue
+
+        if not (0 <= vm.tovert < uv_count):
+            print(
+                f"ERROR: vertex_maps[{map_index}].tovert "
+                f"out of range: {vm.tovert}"
+            )
+            continue
+
+        source_base = uv_to_base[vm.fromvert]
+
+        if source_base < 0:
+            print(
+                f"ERROR: unresolved source mapping at "
+                f"vertex_maps[{map_index}]: "
+                f"fromvert={vm.fromvert}, tovert={vm.tovert}"
+            )
+            continue
+
+        uv_to_base[vm.tovert] = source_base
+
+    # 验证所有 UV 顶点的几何位置。
+    position_errors = 0
+
+    for uv_index, base_index in enumerate(uv_to_base):
+        if not (0 <= base_index < base_count):
+            if position_errors < max_errors:
+                print(
+                    f"ERROR: UV vertex {uv_index} has no "
+                    f"valid base vertex mapping"
+                )
+            position_errors += 1
+            continue
+
+        delta = (
+            uv_vertices[uv_index]
+            - base_vertices[base_index]
+        ).length
+
+        if delta > 1e-6:
+            if position_errors < max_errors:
+                print(
+                    f"ERROR: UV position mismatch: "
+                    f"uv_index={uv_index}, "
+                    f"base_index={base_index}, "
+                    f"delta={delta:.9g}"
+                )
+            position_errors += 1
+
+    # 检查 UV 坐标数组与 UV 顶点数组的长度。
+    if orig_uv is not None and len(orig_uv) != uv_count:
+        print(
+            f"ERROR: orig_uv count={len(orig_uv)}, "
+            f"expected={uv_count}"
+        )
+
+    # 验证基础三角形和 UV 三角形的语义对应关系。
+    if len(base_triangles) != len(uv_triangles):
+        print(
+            "ERROR: triangle index counts differ: "
+            f"base={len(base_triangles)}, "
+            f"uv={len(uv_triangles)}"
+        )
+
+    triangle_errors = 0
+    index_count = min(
+        len(base_triangles),
+        len(uv_triangles),
+    )
+
+    for offset in range(0, index_count - 2, 3):
+        base_tri = base_triangles[offset:offset + 3]
+        uv_tri = uv_triangles[offset:offset + 3]
+
+        # 基础三角形本身必须是有效索引。
+        if not all(0 <= i < base_count for i in base_tri):
+            if triangle_errors < max_errors:
+                print(
+                    f"ERROR: invalid base triangle "
+                    f"at triangle={offset // 3}: {base_tri}"
+                )
+            triangle_errors += 1
+            continue
+
+        # UV 三角形必须是有效索引。
+        if not all(0 <= i < uv_count for i in uv_tri):
+            if triangle_errors < max_errors:
+                print(
+                    f"ERROR: invalid UV triangle "
+                    f"at triangle={offset // 3}: {uv_tri}"
+                )
+            triangle_errors += 1
+            continue
+
+        mapped_tri = tuple(
+            uv_to_base[uv_index]
+            for uv_index in uv_tri
+        )
+
+        if mapped_tri != tuple(base_tri):
+            if triangle_errors < max_errors:
+                print(
+                    f"ERROR: triangle mapping mismatch "
+                    f"at triangle={offset // 3}: "
+                    f"base={tuple(base_tri)}, "
+                    f"uv={tuple(uv_tri)}, "
+                    f"uv_to_base={mapped_tri}"
+                )
+            triangle_errors += 1
+
+    print("position mapping errors:", position_errors)
+    print("triangle mapping errors:", triangle_errors)
+    print("=== UV semantic mapping completed ===")
+    
 def update_duplicate_uv_normals(
     base_normals: list[Vector],
     vertex_maps: list[MeshtoUVMapping],

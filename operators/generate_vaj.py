@@ -14,8 +14,6 @@ TEXTURE_MAP = {
     "Normal": "customTexture_BumpMap"
 }
 
-mat_section = []
-
 def clean_texture_path(raw_path):
     """
     Convert an absolute path to a relative path starting from 'Custom',
@@ -40,9 +38,6 @@ def clean_texture_path(raw_path):
     return normalized_path
 
 def get_muti_mats_dict(obj, creator, clothing_hair_id)->list[str]:
-    if len(mat_section) > 0:
-        return mat_section
-    
     storables = []
     textures_dict = {}
     if obj and obj.type == 'MESH':
@@ -121,7 +116,6 @@ def get_muti_mats_dict(obj, creator, clothing_hair_id)->list[str]:
                 storable_item[target_key] = clean_texture_path(absolute_path)
                 
         storables.append(storable_item)
-        mat_section.append(storable_item)
 
     return storables
 
@@ -311,24 +305,35 @@ def generate_vaj(props, output_path):
         })
 
     # --------------------------------------------------
-    # Root
+    # Components
+    #
+    # VaM adds one component per entry of this array and then reads one
+    # binary section per IBinaryStorable, in component order.  A clothing
+    # item therefore needs exactly one DAZSkinWrapMaterialOptions per
+    # material slot, otherwise the second MaterialOptions section of the
+    # VAB is parsed as cloth settings and the item fails to load.
     # --------------------------------------------------
 
+    material_count = len(mats)
+    if material_count == 0:
+        raise RuntimeError(
+            "服装没有材质槽，无法生成 VAJ"
+        )
+
+    components = [
+        {"type": "DAZMesh"},
+        {"type": "DAZSkinWrap"},
+    ]
+    components.extend(
+        {"type": "DAZSkinWrapMaterialOptions"}
+        for _ in range(material_count)
+    )
+    components.append(
+        {"type": "MVRPluginManager"}
+    )
+
     vaj_data = {
-        "components": [
-            {
-                "type": "DAZMesh"
-            },
-            {
-                "type": "DAZSkinWrap"
-            },
-            {
-                "type": "DAZSkinWrapMaterialOptions"
-            },
-            {
-                "type": "MVRPluginManager"
-            }
-        ],
+        "components": components,
         "storables": storables
     }
 

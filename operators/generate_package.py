@@ -1,7 +1,11 @@
 import bpy
 import bmesh
 import os
+import traceback
 from typing import cast
+
+from ..wrap.DeriveMeshes import debug_vertex_topology
+from ..wrap.bvh_wrap import get_cache
 from .generate_hair_vaj import generate_hair_vaj
 from .generate_hair_vab import generate_hair_vab
 from .generate_hair_vam import generate_hair_vam
@@ -106,6 +110,7 @@ class VAM_OT_GeneratePackage(
                 {'INFO'},
                 "Generating VAJ..."
             )
+
             generate_hair_vaj(
                 hair_data,
                 props,
@@ -163,6 +168,19 @@ class VAM_OT_GeneratePackage(
             dazmesh = get_clothing_daz_mesh(
                 clothing_hair_obj
             )
+
+            material_count = sum(
+                1
+                for slot in clothing_hair_obj.material_slots
+                if slot.material is not None
+            )
+            if material_count == 0:
+                self.report(
+                    {'ERROR'},
+                    "服装没有可用的材质（材质槽为空或未指定材质）"
+                )
+                return {'CANCELLED'}
+
             ##################################################
             # Generate VAB
             ##################################################
@@ -170,16 +188,28 @@ class VAM_OT_GeneratePackage(
                 {'INFO'},
                 "Generating VAB..."
             )
-            generate_vab(
-                genesis,
-                clothing_hair_obj,
-                clothing_hair_id,
-                dazmesh.topology,
-                dazmesh.mesh,
-                wrap_data,
-                author_name,
-                output_dir,
-            )
+            
+            cache = get_cache()
+            try:
+                generate_vab(
+                    genesis,
+                    clothing_hair_obj,
+                    clothing_hair_id,
+                    dazmesh.topology,
+                    dazmesh.mesh,
+                    wrap_data,
+                    author_name,
+                    output_dir,
+                    body_base_count=cache.body_base_count,
+                    body_triangle_count=len(cache.body_triangles),
+                )
+            except (RuntimeError, ValueError, OSError) as error:
+                traceback.print_exc()
+                self.report(
+                    {'ERROR'},
+                    f"VAB 生成失败: {error}"
+                )
+                return {'CANCELLED'}
             ##################################################
             # Generate VAJ
             ##################################################

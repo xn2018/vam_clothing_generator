@@ -11,6 +11,54 @@ from .DeriveMeshes import (
     update_duplicate_uv_normals,
     recalculate_tangents_fast,
 )
+def validate_mesh_mapping(daz:DAZMeshData):
+    base_vertices = daz.base_vertices
+    uv_vertices = daz.uv_vertices
+    base_triangles = daz.base_triangles
+    uv_triangles = daz.uv_triangles
+    vertex_maps = daz.vertex_maps
+
+    print("=== DAZMesh validation ===")
+    print("base vertex count:", len(base_vertices))
+    print("UV vertex count:", len(uv_vertices))
+    print("duplicate UV vertex count:", len(vertex_maps))
+    print("base triangle index count:", len(base_triangles))
+    print("UV triangle index count:", len(uv_triangles))
+
+    if len(base_triangles) != len(uv_triangles):
+        print("ERROR: base_triangles and uv_triangles have different lengths")
+
+    for i, index in enumerate(base_triangles):
+        if not 0 <= index < len(base_vertices):
+            print(f"ERROR: base_triangles[{i}] out of range: {index}")
+
+    for i, index in enumerate(uv_triangles):
+        if not 0 <= index < len(uv_vertices):
+            print(f"ERROR: uv_triangles[{i}] out of range: {index}")
+
+    for i, vm in enumerate(vertex_maps):
+        if not 0 <= vm.fromvert < len(base_vertices):
+            print(f"ERROR: vertex_maps[{i}].fromvert out of range")
+        if not 0 <= vm.tovert < len(uv_vertices):
+            print(f"ERROR: vertex_maps[{i}].tovert out of range")
+
+        if (
+            0 <= vm.fromvert < len(base_vertices)
+            and 0 <= vm.tovert < len(uv_vertices)
+        ):
+            delta = (
+                base_vertices[vm.fromvert]
+                - uv_vertices[vm.tovert]
+            ).length
+
+            if delta > 1e-6:
+                print(
+                    f"ERROR: duplicated vertex position mismatch "
+                    f"at vertex_map[{i}]: delta={delta}"
+                )
+
+    print("=== validation completed ===")
+
 def build_daz_mesh(
     obj: bpy.types.Object,
     is_body:bool,
