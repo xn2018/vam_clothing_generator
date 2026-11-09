@@ -226,116 +226,114 @@ class DAZHairData:
             max_distance=0.1
     ):
         """
-        Build RuntimeHairGeometryCreator.hairRootToScalpIndices
-        hair_obj:
-            Blender curve hair
-        scalp_obj:
-            VaM scalp provider mesh
-        return:
-            [
-                scalp vertex index,
-                ...
-            ]
-        Example:
-            [408,409,410,411]
+        Build RuntimeHairGeometryCreator.hairRootToScalpIndices for curve hair.
+
+        One strand per active scalp vertex: the active scalp vertices are
+        visited in vertex order and each takes the nearest still-unused
+        strand root (the same rule as VAM_OT_ExtractHairStrands), so the
+        exported strand count matches the scalp mask.
+
+        Returns a list aligned with the curve splines; splines that were not
+        matched are -1 and are skipped by CurveHairImporter.extract().
         """
+        from .curve_tools import (
+            active_vertex_indices,
+            nearest_unused,
+            spline_root_world,
+        )
+
         if scalp_obj.type != "MESH":
             raise TypeError(
                 "Scalp object must be mesh"
             )
-        mesh = scalp_obj.data
-        ##################################################
-        # collect scalp vertices
-        ##################################################
-        scalp_vertices=[]
-        vg=None
-        if scalp_group:
-            vg=scalp_obj.vertex_groups.get(
-                scalp_group
+        if hair_obj.type != "CURVE":
+            raise TypeError(
+                "Hair object must be Curve"
             )
-        for v in mesh.vertices:
-            if vg:
-                enabled=False
-                for g in v.groups:
-                    if g.group == vg.index:
-                        enabled=True
-                        break
-                if not enabled:
-                    continue
-            world_pos = (
-                scalp_obj.matrix_world @ v.co
-            )
-            scalp_vertices.append(
-                (
-                    v.index,
-                    world_pos
-                )
-            )
-        if len(scalp_vertices)==0:
-            raise RuntimeError(
-                "No scalp vertices found"
-            )
-        ##################################################
-        # KDTree
-        ##################################################
-        kd=KDTree(
-            len(scalp_vertices)
+
+        scalp_indices = active_vertex_indices(
+            scalp_obj,
+            scalp_group
         )
-        for i,(vid,co) in enumerate(
-            scalp_vertices
-        ):
+        if not scalp_indices:
+            raise RuntimeError(
+                f"No scalp vertices found in group {scalp_group!r}"
+            )
+
+        splines = list(hair_obj.data.splines)
+        if not splines:
+            raise RuntimeError(
+                "Hair curve has no splines"
+            )
+
+        ##################################################
+        # KDTree over spline roots
+        ##################################################
+        kd = KDTree(len(splines))
+        entries = 0
+        for spline_index, spline in enumerate(splines):
+            root_world = spline_root_world(
+                hair_obj,
+                spline
+            )
+            if root_world is None:
+                continue
             kd.insert(
-                co,
-                vid
+                root_world,
+                spline_index
+            )
+            entries += 1
+        if entries == 0:
+            raise RuntimeError(
+                "Every spline in the hair curve is empty"
             )
         kd.balance()
+
         ##################################################
-        # find hair roots
+        # unique assignment: one strand per scalp vertex
         ##################################################
-        result=[]
-        curve=hair_obj.data
-        for spline in curve.splines:
-            if spline.type=="BEZIER":
-                if len(spline.bezier_points)==0:
-                    continue
-                root=spline.bezier_points[0].co
-            else:
-                if len(spline.points)==0:
-                    continue
-                p=spline.points[0]
-                root=Vector(
-                    (
-                        p.co.x,
-                        p.co.y,
-                        p.co.z
-                    )
-                )
-            root_world = (
-                hair_obj.matrix_world @ root
+        used = set()
+        result = [-1] * len(splines)
+        too_far = []
+
+        for scalp_index in scalp_indices:
+            vertex_world = (
+                scalp_obj.matrix_world
+                @ scalp_obj.data.vertices[scalp_index].co
             )
-            ##################################################
-            # nearest scalp vertex
-            ##################################################
-            co,index,distance = kd.find(root_world)
-            distance = cast(float,distance)
-            if distance > max_distance:
-                print(
-                    "Hair root too far:",
-                    distance
-                )
+            spline_index, distance = nearest_unused(
+                kd,
+                vertex_world,
+                used,
+                entries
+            )
+            if spline_index is None:
                 continue
-            result.append(
-                index
+            used.add(spline_index)
+            result[spline_index] = scalp_index
+            if distance > max_distance:
+                too_far.append(
+                    (spline_index, scalp_index, distance)
+                )
+
+        if too_far:
+            details = ", ".join(
+                f"spline {spline} -> vertex {vertex}: {distance:.3f}m"
+                for spline, vertex, distance in too_far[:8]
             )
-        ##################################################
-        # remove duplicate
-        ##################################################
-        result=list(
-            dict.fromkeys(
-                result
+            print(
+                "[Hair] WARNING: roots far from the scalp "
+                f"(use Set Spline Root / Extract Curve): {details}"
             )
-        )
-        self.hair_root_to_scalp_indices=result
+
+        unmatched = sum(1 for value in result if value < 0)
+        if unmatched:
+            print(
+                "[Hair] splines without a scalp vertex:",
+                unmatched
+            )
+
+        self.hair_root_to_scalp_indices = result
         return result
     def build_particle_hair_root_scalp_mapping(
         self,
@@ -437,13 +435,28 @@ class DAZHairData:
             # 只取材质0
             if poly.material_index!=0:
                 continue
+            indices = list(poly.vertices)
+            if len(indices) < 3:
+                continue
+            #
+            # Match DAZMesh.PolyListToTriangleIndexes:
+            # triangles use (2,1,0), quads add (0,3,2).
+            #
             self.scalp_triangle_indices.extend(
                 [
-                    poly.vertices[2],
-                    poly.vertices[1],
-                    poly.vertices[0]
+                    indices[2],
+                    indices[1],
+                    indices[0]
                 ]
             )
+            if len(indices) == 4:
+                self.scalp_triangle_indices.extend(
+                    [
+                        indices[0],
+                        indices[3],
+                        indices[2]
+                    ]
+                )
         #
         # provider name
         #

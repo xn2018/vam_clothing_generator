@@ -71,6 +71,30 @@ class VAMGEN_PT_MainPanel(bpy.types.Panel):
                     icon="TRACKING",
                     text="Resample"
                 )
+                conv_layout = box.split(factor=0, align=True)
+                colv3 = conv_layout.column()
+                colv3.prop(
+                    props,
+                    "pre_extracted_hair"
+                )
+                colv4 = conv_layout.column()
+                colv4.operator(
+                    "vam.ot_extracthairstrands",
+                    icon="CON_FOLLOWPATH",
+                    text="Extract Curve"
+                )
+                split_set_root_dev = box.split(factor=0, align=True)
+                split1 = split_set_root_dev.column()
+                split1.label(
+                    text="Set Spline Root"
+                )
+                split2 = split_set_root_dev.column()
+                split2.operator(
+                    "vam.ot_setsplineroot",
+                    icon="MOD_PARTICLE_INSTANCE",
+                    text="Set Spline Root"
+                )
+                
         # --------------------------------------------------
         # VAJ
         # --------------------------------------------------
@@ -156,17 +180,7 @@ class VAMGEN_PT_MainPanel(bpy.types.Panel):
             icon="SNAP_FACE",
             text="Select Traingles by ID"
         )
-        split_set_root_dev = box_gen.split(factor=0, align=True)
-        col1 = split_set_root_dev.column()
-        col1.label(
-            text="Set Spline Root"
-        )
-        col2 = split_set_root_dev.column()
-        col2.operator(
-            "vam.ot_setsplineroot",
-            icon="MOD_PARTICLE_INSTANCE",
-            text="Set Spline Root"
-        )
+        
         split_validate_dev = box_gen.split(factor=0, align=True)
         col1 = split_validate_dev.column()
         col1.label(

@@ -1,7 +1,10 @@
 from typing import cast
 
 import bpy
-from mathutils import Vector
+from .curve_tools import (
+    resample_polyline,
+    sample_spline_polyline,
+)
 from .daz_hair_data import DAZHairStrand
 class CurveHairImporter:
     """
@@ -79,34 +82,18 @@ class CurveHairImporter:
         spline,
         segments
     ):
-        points=[]
-        #
-        # Bezier
-        #
-        if spline.type=="BEZIER":
-            points=self.sample_bezier(
-                spline,
-                segments
-            )
-        #
-        # Poly
-        #
-        else:
-            src=[]
-            for p in spline.points:
-                src.append(
-                    Vector(
-                        (
-                            p.co.x,
-                            p.co.y,
-                            p.co.z
-                        )
-                    )
-                )
-            points=self.resample_polyline(
-                src,
-                segments
-            )
+        """
+        Sample one spline into ``segments`` evenly spaced points.
+
+        BEZIER splines are evaluated through every segment (handles
+        included) and then resampled by arc length, so all strands get
+        the same point count regardless of their control point density.
+        """
+        count=max(2,int(segments))
+        points=sample_spline_polyline(spline)
+        if len(points)<2:
+            return []
+        points=resample_polyline(points,count)
         #
         # local -> world
         #
@@ -114,75 +101,6 @@ class CurveHairImporter:
             self.obj.matrix_world @ p
             for p in points
         ]
-    ##################################################
-    # Bezier sampling
-    ##################################################
-    def sample_bezier(
-        self,
-        spline,
-        count
-    ):
-        points=[]
-        bezier=spline.bezier_points
-        if len(bezier)<2:
-            return points
-        p0=bezier[0]
-        p3=bezier[-1]
-        for i in range(count):
-            t=i/(count-1)
-            a=(
-                p0.co *
-                (1-t)**3
-            )
-            b=(
-                p0.handle_right *
-                3 *
-                (1-t)**2 *
-                t
-            )
-            c=(
-                p3.handle_left *
-                3 *
-                (1-t) *
-                t*t
-            )
-            d=(
-                p3.co *
-                t**3
-            )
-            points.append(
-                a+b+c+d
-            )
-        return points
-    ##################################################
-    # Polyline resample
-    ##################################################
-    def resample_polyline(
-        self,
-        points,
-        count
-    ):
-        if len(points)<2:
-            return points
-        result=[]
-        total=len(points)-1
-        for i in range(count):
-            t=i/(count-1)
-            pos=t*total
-            index=int(pos)
-            factor=pos-index
-            if index>=total:
-                result.append(
-                    points[-1]
-                )
-            else:
-                result.append(
-                    points[index].lerp(
-                        points[index+1],
-                        factor
-                    )
-                )
-        return result
     ##################################################
     # default rigidity
     ##################################################

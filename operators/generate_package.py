@@ -18,6 +18,11 @@ from .generate_vam import generate_vam
 from ..hairlibs.curve_resampler import (
     resample_curve_object
 )
+from ..hairlibs.curve_tools import (
+    HairExtractionError,
+    build_extracted_object,
+    extract_strands,
+)
 class VAM_OT_GeneratePackage(
     bpy.types.Operator
 ):
@@ -384,6 +389,73 @@ class VAM_OT_SELECTTRIANGLES(bpy.types.Operator):
         # Write changes back to mesh and refresh view
         bmesh.update_edit_mesh(me)
         self.report({'INFO'}, f"Successfully selected face Index: {triangles_id}")
+        return {'FINISHED'}
+class VAM_OT_ExtractHairStrands(bpy.types.Operator):
+    """Extract one hair strand per active scalp vertex ("scalp" vertex group)"""
+    bl_idname = "vam.ot_extracthairstrands"
+    bl_label = "Extract Curve Hair"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    @classmethod
+    def poll(cls, context):
+        props = getattr(context.scene, "vamgen_props", None)
+        if props is None:
+            return False
+        return (
+            props.genesis_obj is not None
+            and
+            props.pre_extracted_hair is not None
+        )
+
+    def execute(self, context: bpy.types.Context)-> set[OperatorReturn]:
+        props = context.scene.vamgen_props
+        scalp_obj = props.genesis_obj
+        source_hair = props.pre_extracted_hair
+
+        if scalp_obj is None or scalp_obj.type != 'MESH':
+            self.report({'ERROR'}, "Genesis2Female 必须是头皮网格对象")
+            return {'CANCELLED'}
+        if source_hair is None or source_hair.type != 'CURVE':
+            self.report({'ERROR'}, "pre_extracted_hair 必须是 Curve 发型对象")
+            return {'CANCELLED'}
+
+        if context.object is not None and context.object.mode != 'OBJECT':
+            bpy.ops.object.mode_set(mode='OBJECT')
+
+        try:
+            result = extract_strands(scalp_obj, source_hair)
+            extracted = build_extracted_object(
+                source_hair,
+                result.spline_indices,
+                result.reverse_flags
+            )
+        except HairExtractionError as error:
+            self.report({'ERROR'}, str(error))
+            return {'CANCELLED'}
+
+        # The extracted curve is what the hair pipeline consumes.
+        props.clothing_hair_obj = extracted
+        if context.selected_objects is None:
+            self.report({'ERROR'}, "Please select a Curve Object")
+            return {'CANCELLED'}
+        for obj in context.selected_objects:
+            obj.select_set(False)
+        extracted.select_set(True)
+        context.view_layer.objects.active = extracted
+
+        message = (
+            f"提取完成: {len(result.spline_indices)} 根发束 / "
+            f"{result.scalp_vertex_count} 个激活头皮顶点 "
+            f"(源发型共 {result.total_splines} 根)"
+        )
+        print("[Hair]", message)
+        if result.warnings:
+            self.report(
+                {'WARNING'},
+                message + "；" + "；".join(result.warnings)
+            )
+        else:
+            self.report({'INFO'}, message)
         return {'FINISHED'}
 class VAM_OT_SETSPLINEROOT(bpy.types.Operator):
     """Set the selected vertex in curve editing mode as the starting point of the current spline."""

@@ -25,6 +25,10 @@ HAIR_TYPES = [
     ("Curve", "Curve", ""),
 ]
 
+def poll_curve_hair_object(self, obj):
+    """Only Curve objects can be used as the pre-extracted hair source."""
+    return obj is None or obj.type == 'CURVE'
+
 class VAMGEN_Properties(bpy.types.PropertyGroup):
 
     # --------------------------------------------------
@@ -70,6 +74,12 @@ class VAMGEN_Properties(bpy.types.PropertyGroup):
         name="Hair Type",
         items=HAIR_TYPES,
         default="Particles"
+    ) # type: ignore
+
+    pre_extracted_hair: bpy.props.PointerProperty(
+        name="Curve Hairs",
+        type=bpy.types.Object,
+        poll=poll_curve_hair_object,
     ) # type: ignore
 
     hair_segments: IntProperty(

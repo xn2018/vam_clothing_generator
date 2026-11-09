@@ -272,6 +272,13 @@ def get_particle_hair_segments(eval_psys):
             return actual_segments
     return 0
 def get_curve_segments(obj)->int:
+    """
+    Points per strand used when exporting curve hair.
+
+    VaM's RuntimeHairGeometryCreator stores "Segments" as the number of
+    points per strand, so return the first spline's point count (at least
+    2) instead of control-point-count minus one.
+    """
     if not obj or obj.type != 'CURVE':
         raise RuntimeError("[SEGMENT] get curve segments error, selected object was not Curve.")
     curve = obj.data
@@ -282,18 +289,15 @@ def get_curve_segments(obj)->int:
         num_points = len(spline.bezier_points)
     else:
         num_points = len(spline.points)
-    if spline.use_cyclic_u:
-        segments = num_points
-    else:
-        segments = max(0, num_points - 1)
-    return segments
+    return max(2, num_points)
 ##################################################
 # Factory
 ##################################################
 def create_hair_task(
         scalp_obj,
         hair_obj,
-        hair_type
+        hair_type,
+        curve_segments=None
 ):
     eval_psys= None
     segments=0
@@ -315,7 +319,14 @@ def create_hair_task(
         eval_psys = eval_obj.particle_systems.active
         segments=get_particle_hair_segments(eval_psys)
     elif hair_type == "Curve":
-        segments=get_curve_segments(hair_obj)
+        if hair_obj is None or hair_obj.type != 'CURVE':
+            raise RuntimeError("Hair object must be a Curve")
+        if curve_segments:
+            segments = max(2, int(curve_segments))
+        else:
+            segments = get_curve_segments(hair_obj)
+        if segments < 2:
+            raise RuntimeError("Curve hair has no usable splines")
     return HairBuildTask(
         scalp_obj=scalp_obj,
         hair_obj=hair_obj,

@@ -134,7 +134,8 @@ class VAM_OT_SKINWRAPCALC(bpy.types.Operator):
                 self.task=create_hair_task(
                     props.genesis_obj,
                     props.clothing_hair_obj,
-                    props.hair_type
+                    props.hair_type,
+                    props.hair_segments
                 )
             else:
                 self.task=create_skinwrap_task(
